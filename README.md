@@ -10,9 +10,9 @@ Zotero 7-9 compatible extension for three OpenRouter-powered workflows:
 
 The primary entry point is the right-side Zotero pane navigation bar. The plugin injects three persistent icon buttons into the visible `sidenav`/vertical tab bar:
 
-- `读取论文`: extracts the selected/current paper text, asks the chat model for a Chinese reading note, and saves the result as a child Zotero note.
-- `查找引用`: opens the citation-search panel where the user enters one idea or claim, searches the local vector index, reranks candidates, and displays recommendations.
-- `回答笔记问题`: reads the current/selected note, finds the latest unanswered `Q:`, sends the parent PDF full text before the note context, and appends `Answer:`.
+- `read paper`: extracts the selected/current paper text, asks the chat model for a Chinese reading note, and saves the result as a child Zotero note.
+- `search for references`: opens the citation-search panel where the user enters one idea or claim, searches the local vector index, reranks candidates, and displays recommendations.
+- `answer questions`: reads the current/selected note, finds the latest unanswered `Q:`, sends the parent PDF full text before the note context, and appends `Answer:`.
 
 The previous main-list top toolbar and reader-note-toolbar experiments have been removed. The right-side button group is now the single visual entry point. Right-click context menu entries remain as auxiliary access.
 
@@ -114,7 +114,7 @@ npm run diagnose
 The build script creates:
 
 ```text
-dist/zotero-ai-assistant-0.1.19.xpi
+dist/zotero-ai-assistant-0.1.25.xpi
 ```
 
 ## Install For Testing
@@ -122,7 +122,7 @@ dist/zotero-ai-assistant-0.1.19.xpi
 1. Run `npm run build`.
 2. Open Zotero.
 3. Go to `Tools -> Plugins`.
-4. Drag `dist/zotero-ai-assistant-0.1.19.xpi` into the plugin window.
+4. Drag `dist/zotero-ai-assistant-0.1.25.xpi` into the plugin window.
 5. Restart Zotero if prompted.
 
 ## Implementation Notes
