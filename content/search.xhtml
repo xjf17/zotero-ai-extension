@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<?xml-stylesheet href="search.css" type="text/css"?>
+<window
+  id="zotero-ai-search-window"
+  title="AI 查找引用"
+  xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  width="920"
+  height="720"
+  persist="screenX screenY width height">
+  <script src="search.js"/>
+  <vbox id="zotero-ai-search-root" flex="1">
+    <hbox id="zotero-ai-search-header" align="center">
+      <label id="zotero-ai-title" value="AI 查找引用"/>
+      <spacer flex="1"/>
+      <button id="zotero-ai-rebuild" label="重建当前视图索引"/>
+    </hbox>
+    <vbox id="zotero-ai-query-box">
+      <label value="输入一句想法或论点"/>
+      <textbox id="zotero-ai-query" multiline="true" rows="4"/>
+      <hbox align="center">
+        <button id="zotero-ai-search" label="查找引用"/>
+        <button id="zotero-ai-clear" label="清空"/>
+        <spacer flex="1"/>
+        <label id="zotero-ai-status" value="准备就绪"/>
+      </hbox>
+    </vbox>
+    <richlistbox id="zotero-ai-results" flex="1"/>
+  </vbox>
+</window>

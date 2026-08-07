@@ -1,0 +1,19 @@
+{
+  "manifest_version": 2,
+  "name": "Zotero AI Assistant",
+  "version": "0.1.25",
+  "description": "Read papers, find citation candidates, and answer note questions with OpenRouter models.",
+  "author": "Codex",
+  "icons": {
+    "48": "content/icons/message-circle-question.svg",
+    "96": "content/icons/message-circle-question.svg"
+  },
+  "applications": {
+    "zotero": {
+      "id": "zotero-ai-assistant@example.com",
+      "strict_min_version": "7.0",
+      "strict_max_version": "99.0.*",
+      "update_url": "https://example.com/zotero-ai-assistant/updates.json"
+    }
+  }
+}

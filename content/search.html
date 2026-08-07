@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8"/>
+  <title>AI 查找引用</title>
+  <link rel="stylesheet" href="search.css"/>
+</head>
+<body>
+  <div id="zotero-ai-search-root">
+    <div id="zotero-ai-search-header">
+      <span id="zotero-ai-title">AI 查找引用</span>
+      <span style="flex:1"></span>
+      <button id="zotero-ai-rebuild">重建当前视图索引</button>
+    </div>
+    <div id="zotero-ai-query-box">
+      <label for="zotero-ai-query">输入一句想法或论点</label>
+      <textarea id="zotero-ai-query" rows="4"></textarea>
+      <div id="zotero-ai-action-row">
+        <button id="zotero-ai-search">查找引用</button>
+        <button id="zotero-ai-clear">清空</button>
+        <span style="flex:1"></span>
+        <span id="zotero-ai-status">准备就绪</span>
+      </div>
+    </div>
+    <div id="zotero-ai-chunk-settings">
+      <span class="settings-label">索引分块参数（重建时生效）：</span>
+      <label for="zotero-ai-chunk-size">Chunk 大小
+        <input type="number" id="zotero-ai-chunk-size" value="500" min="100" max="5000" step="50"/>
+      </label>
+      <label for="zotero-ai-overlap">Overlap
+        <input type="number" id="zotero-ai-overlap" value="100" min="0" max="1000" step="20"/>
+      </label>
+    </div>
+    <div id="zotero-ai-results"></div>
+  </div>
+  <script src="search.js" type="application/javascript"></script>
+</body>
+</html>

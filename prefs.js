@@ -1,0 +1,9 @@
+pref("extensions.zotero-ai.openrouterApiKey", "");
+pref("extensions.zotero-ai.chatModel", "deepseek/deepseek-v4-flash-0731");
+pref("extensions.zotero-ai.customChatModel", "");
+pref("extensions.zotero-ai.embeddingModel", "nvidia/nemotron-3-embed-1b:free");
+pref("extensions.zotero-ai.customEmbeddingModel", "");
+pref("extensions.zotero-ai.pdfMode", "local-first");
+pref("extensions.zotero-ai.maxSummaryChunks", 0);
+pref("extensions.zotero-ai.summaryExcludeTrailingPages", 2);
+pref("extensions.zotero-ai.referenceTopK", 5);

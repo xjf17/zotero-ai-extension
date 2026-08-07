@@ -1,0 +1,56 @@
+<vbox
+  id="zotero-ai-preferences"
+  xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  xmlns:html="http://www.w3.org/1999/xhtml">
+  <html:fieldset class="zotero-ai-pref-section">
+    <html:legend>OpenRouter</html:legend>
+
+    <html:label for="zotero-ai-api-key">API Key</html:label>
+    <html:input id="zotero-ai-api-key" type="password" placeholder="sk-or-..." preference="extensions.zotero-ai.openrouterApiKey"/>
+
+    <html:label for="zotero-ai-chat-model">&#32842;&#22825;&#27169;&#22411;</html:label>
+    <html:select id="zotero-ai-chat-model" preference="extensions.zotero-ai.chatModel">
+      <html:option value="google/gemini-flash-latest">Gemini Flash</html:option>
+      <html:option value="moonshotai/kimi-latest">Kimi</html:option>
+      <html:option value="custom">&#33258;&#23450;&#20041; model id</html:option>
+    </html:select>
+
+    <html:label for="zotero-ai-custom-chat-model">&#33258;&#23450;&#20041;&#32842;&#22825;&#27169;&#22411;</html:label>
+    <html:input id="zotero-ai-custom-chat-model" type="text" placeholder="provider/model-id" preference="extensions.zotero-ai.customChatModel"/>
+
+    <html:label for="zotero-ai-embedding-model">Embedding &#27169;&#22411;</html:label>
+    <html:select id="zotero-ai-embedding-model" preference="extensions.zotero-ai.embeddingModel">
+      <html:option value="openai/text-embedding-3-small">OpenAI text-embedding-3-small</html:option>
+      <html:option value="openai/text-embedding-3-large">OpenAI text-embedding-3-large</html:option>
+      <html:option value="custom">&#33258;&#23450;&#20041; embedding model id</html:option>
+    </html:select>
+
+    <html:label for="zotero-ai-custom-embedding-model">&#33258;&#23450;&#20041; Embedding &#27169;&#22411;</html:label>
+    <html:input id="zotero-ai-custom-embedding-model" type="text" placeholder="provider/embedding-model-id" preference="extensions.zotero-ai.customEmbeddingModel"/>
+
+    <html:label for="zotero-ai-pdf-mode">PDF &#27169;&#24335;</html:label>
+    <html:select id="zotero-ai-pdf-mode" preference="extensions.zotero-ai.pdfMode">
+      <html:option value="local-first">&#26412;&#22320;&#25991;&#26412;&#20248;&#20808;</html:option>
+      <html:option value="openrouter-pdf">OpenRouter PDF parser/OCR</html:option>
+    </html:select>
+  </html:fieldset>
+
+  <html:fieldset class="zotero-ai-pref-section">
+    <html:legend>&#32034;&#24341;&#35774;&#32622;</html:legend>
+
+    <html:label for="zotero-ai-summary-chunks">&#25688;&#35201;&#26368;&#22810;&#29255;&#27573;&#25968; (0 = &#19981;&#38480;&#21046;)</html:label>
+    <html:input id="zotero-ai-summary-chunks" type="number" min="0" max="500" preference="extensions.zotero-ai.maxSummaryChunks"/>
+
+    <html:label for="zotero-ai-summary-exclude-pages">&#25688;&#35201;&#25490;&#38500;&#26411;&#23614;&#39029;&#25968;</html:label>
+    <html:input id="zotero-ai-summary-exclude-pages" type="number" min="0" max="200" preference="extensions.zotero-ai.summaryExcludeTrailingPages"/>
+
+    <html:label for="zotero-ai-top-k">&#24341;&#29992;&#32467;&#26524;&#25968;&#37327;</html:label>
+    <html:input id="zotero-ai-top-k" type="number" min="1" max="10" preference="extensions.zotero-ai.referenceTopK"/>
+  </html:fieldset>
+
+  <html:div class="zotero-ai-pref-actions">
+    <html:button id="zotero-ai-save-prefs" type="button">&#20445;&#23384;&#35774;&#32622;</html:button>
+    <html:button id="zotero-ai-rebuild-index" type="button">&#37325;&#24314;&#24403;&#21069;&#35270;&#22270;&#32034;&#24341;</html:button>
+    <html:span id="zotero-ai-pref-status"></html:span>
+  </html:div>
+</vbox>
