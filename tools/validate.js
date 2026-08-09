@@ -7,7 +7,16 @@ const requiredFiles = [
   "manifest.json",
   "bootstrap.js",
   "prefs.js",
+  "content/app.js",
   "content/zotero-ai.js",
+  "content/modules/config.js",
+  "content/modules/text-utils.js",
+  "content/modules/note-format.js",
+  "content/modules/zotero-helpers.js",
+  "content/modules/text-source.js",
+  "content/modules/index-store.js",
+  "content/modules/prompts.js",
+  "content/modules/ai-client.js",
   "content/search.xhtml",
   "content/search.js",
   "content/search.css",
@@ -46,7 +55,7 @@ assert(
 const packageJSON = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
 assert(packageJSON.version === manifest.version, "package.json version must match manifest.json version");
 
-for (const file of ["bootstrap.js", "content/zotero-ai.js", "content/search.js", "content/preferences-pane.js"]) {
+for (const file of requiredFiles.filter((name) => name.endsWith(".js"))) {
   childProcess.execFileSync(process.execPath, ["--check", path.join(root, file)], {
     stdio: "inherit"
   });

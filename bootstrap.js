@@ -31,7 +31,20 @@ async function startup({ id, version, rootURI }) {
     stylesheets: [rootURI + "content/preferences-pane.css"]
   });
 
-  Services.scriptloader.loadSubScript(rootURI + "content/zotero-ai.js");
+  for (const script of [
+    "content/modules/config.js",
+    "content/modules/text-utils.js",
+    "content/modules/note-format.js",
+    "content/modules/zotero-helpers.js",
+    "content/modules/text-source.js",
+    "content/modules/index-store.js",
+    "content/modules/prompts.js",
+    "content/modules/ai-client.js",
+    "content/app.js",
+    "content/zotero-ai.js"
+  ]) {
+    Services.scriptloader.loadSubScript(rootURI + script);
+  }
   ZoteroAI.init({ id, version, rootURI });
   Zotero.ZoteroAI = ZoteroAI;
   ZoteroAI.addToAllWindows();
