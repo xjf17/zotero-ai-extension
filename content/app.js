@@ -983,7 +983,9 @@
         }
         let injected = 0;
         for (const card of cards) {
-          if (card.querySelector(`.${PLUGIN_NS}-explain-btn`)) {
+          const existingButton = card.querySelector(`.${PLUGIN_NS}-explain-btn`);
+          if (existingButton) {
+            this.positionExplainButton(card, existingButton);
             continue;
           }
           if (!this.annotationCardHasImage(card)) {
@@ -1017,6 +1019,35 @@
       }
     }
 
+    annotationCardHasTranslateButton(card) {
+      const elements = Array.from(card.querySelectorAll?.(
+        "button, toolbarbutton, [role='button'], img, svg, [title], [aria-label], [tooltiptext], [data-l10n-id], [src], [href]"
+      ) || []);
+      for (const element of elements) {
+        if (element.classList?.contains(`${PLUGIN_NS}-explain-btn`)) {
+          continue;
+        }
+        const text = [
+          element.id,
+          element.className,
+          element.getAttribute?.("title"),
+          element.getAttribute?.("aria-label"),
+          element.getAttribute?.("tooltiptext"),
+          element.getAttribute?.("data-l10n-id"),
+          element.getAttribute?.("src"),
+          element.getAttribute?.("href")
+        ].join(" ").toLowerCase();
+        if (text.includes("translate") || text.includes("translation") || text.includes("翻译")) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    positionExplainButton(card, btn) {
+      btn.style.right = this.annotationCardHasTranslateButton(card) ? "56px" : "32px";
+    }
+
     getAnnotationCardKey(card) {
       const withKey = card.closest?.("[data-sidebar-annotation-id], [data-annotation-id], [data-key], [data-id]")
         || card.querySelector?.("[data-sidebar-annotation-id], [data-annotation-id], [data-key], [data-id]");
@@ -1040,12 +1071,16 @@
       ico.width = 14;
       ico.height = 14;
       ico.alt = "✨";
+      ico.style.cssText = "width:14px;height:14px;display:block;pointer-events:none";
       btn.appendChild(ico);
       btn.style.cssText = [
-        "position:absolute", "top:4px", "right:32px", "z-index:10",
+        "position:absolute", "top:4px", "z-index:2147483647",
+        "width:22px", "height:22px", "display:inline-flex", "align-items:center",
+        "justify-content:center", "box-sizing:border-box", "pointer-events:auto",
         "background:rgba(255,255,255,0.85)", "border:1px solid rgba(0,0,0,0.15)",
         "border-radius:3px", "cursor:pointer", "padding:2px 3px", "line-height:1"
       ].join(";");
+      this.positionExplainButton(card, btn);
       const view = doc.defaultView || card.ownerGlobal;
       if (!view?.getComputedStyle || view.getComputedStyle(card).position === "static") {
         card.style.position = "relative";

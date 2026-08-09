@@ -1,140 +1,210 @@
 # Zotero AI Assistant
 
-Zotero 7-9 compatible extension for three OpenAI-compatible API workflows. OpenRouter remains the default provider:
+A Zotero plugin that uses AI to help you read papers, find citation candidates, and answer questions written in your notes. It connects to any OpenAI-compatible API; the default and recommended provider is [OpenRouter](https://openrouter.ai), which gives access to many AI models through one API key.
 
-- Read the current paper and save a Chinese structured reading note.
-- Search the local Zotero library for citation candidates using text extraction, local chunking, embeddings, and reranking.
-- Answer the latest unanswered `Q:` in a Zotero note and append a formatted `Answer:`.
+Compatible with Zotero 7, 8, and 9.
 
-## User Interface
+---
 
-The primary entry point is the right-side Zotero pane navigation bar. The plugin injects three persistent icon buttons into the visible `sidenav`/vertical tab bar:
+## Table of Contents
 
-- `读取论文`: extracts the selected/current paper text, asks the chat model for a Chinese reading note, and saves the result as a child Zotero note.
-- `查找引用`: opens the citation-search panel where the user enters one idea or claim, searches the local vector index, reranks candidates, and displays recommendations.
-- `回答笔记问题`: reads the current/selected note, finds the latest unanswered `Q:`, sends the parent PDF full text before the note context, and appends `Answer:`.
+1. [Installation](#installation)
+2. [API Setup](#api-setup)
+3. [Features](#features)
+   - [Read Paper](#1-read-paper)
+   - [Find Citations](#2-find-citations)
+   - [Answer Note Questions](#3-answer-note-questions)
+   - [Explain Figures and Formulas](#4-explain-figures-and-formulas)
+4. [Advanced Settings](#advanced-settings)
+5. [Troubleshooting](#troubleshooting)
 
-The previous main-list top toolbar and reader-note-toolbar experiments have been removed. The right-side button group is now the single visual entry point. Right-click context menu entries remain as auxiliary access.
+---
 
-## Main Files
+## Installation
 
-- `bootstrap.js`: Zotero plugin lifecycle. It registers chrome content, registers the preferences pane, loads `content/zotero-ai.js`, exposes `Zotero.ZoteroAI`, and injects UI into open Zotero windows.
-- `content/zotero-ai.js`: core plugin logic. It owns UI injection, OpenAI-compatible API calls, PDF text extraction, chunking, embeddings, local index storage, summary generation, citation search, note Q&A, and progress feedback.
-- `content/toolbar.css`: styles for the three right-side icon buttons.
-- `content/search.xhtml`: citation-search dialog shell.
-- `content/search.js`: citation-search dialog behavior, including query submission, rebuild-index button handling, result rendering, and progress status forwarding.
-- `content/search.css`: citation-search dialog layout and result styling.
-- `content/preferences-pane.xhtml`: Zotero Settings pane UI.
-- `content/preferences-pane.js`: preference loading/saving and rebuild-index button behavior in settings.
-- `content/preferences-pane.css`: settings pane styling.
-- `prefs.js`: default preference values.
-- `tools/build-xpi.ps1`: builds the `.xpi` package.
-- `tools/validate.js`: checks required files, manifest/package consistency, JS syntax, basic XHTML quote sanity, and XPI entry paths.
-- `tools/diagnose-xpi.js`: inspects the built XPI and Zotero version compatibility metadata.
-
-## Prompt Locations
-
-Prompts are intentionally kept in `content/zotero-ai.js` so they are easy to edit during current development:
-
-- `parsePdfBase64()`: fallback PDF parser/OCR extraction prompt.
-- `summarizePaperV2()`: paper-reading summary prompt.
-- `rerankReferences()`: citation-search reranking prompt.
-- `answerLatestQuestion()`: note Q&A prompt.
-
-If prompt editing becomes frequent, the next sensible cleanup is moving these strings into a small `content/prompts.js` module. For now they remain in place to preserve your current manual edits.
-
-## Workflow Logic
-
-### Paper Reading
-
-1. Resolve the target paper from the active reader PDF when possible; otherwise use the selected regular Zotero item.
-2. Find the best PDF attachment.
-3. Prefer Zotero indexed full text and page text.
-4. If local text is unavailable and PDF mode allows it, use the configured remote PDF parser/OCR fallback.
-5. If page boundaries are available, remove the configured number of trailing pages before summarization.
-6. Split the selected text into summary chunks. `maxSummaryChunks = 0` means no chunk-count cap.
-7. Call the configured text model through its selected API endpoint and format.
-8. Convert Markdown to Zotero note HTML and save a child note under the paper.
-
-### Citation Search
-
-1. The second icon opens `content/search.xhtml`.
-2. The user enters a Chinese idea or claim.
-3. `search.js` calls `app.searchReferences()`.
-4. The plugin loads the local index for the current library.
-5. If the index is empty, it asks whether to rebuild the current visible item-view index.
-6. Rebuild extracts PDF text, chunks it, calls the embedding model in batches, and stores vectors under Zotero storage in `zotero-ai-assistant/index-<libraryID>.json`.
-7. Search embeds the query, computes cosine similarity against local chunks, and returns top candidates.
-8. The chat model reranks candidates and extracts reasons plus short original excerpts.
-9. Results are displayed only in the search panel; they are not written to notes automatically.
-
-### Note Q&A
-
-1. Resolve the current note from the active note editor if possible; otherwise use the selected Zotero note.
-2. Parse note text for `Q:`, `Question:`, `问题:`, `Answer:`, or `回答:` markers.
-3. Work backward from the end and answer only the latest question that does not already have a following answer marker.
-4. Read the parent paper PDF text in full when available.
-5. Build one prompt with the PDF full text first, followed by the current note and sibling child notes.
-6. Call the chat model.
-7. Convert Markdown to Zotero note HTML and append it under an `Answer:` heading.
-
-## Progress Feedback
-
-Progress feedback uses Zotero's built-in `Zotero.ProgressWindow`, not a custom dialog. Each long operation creates a progress handle with:
-
-- `changeHeadline("Zotero AI")`
-- one `ItemProgress` line for current operation text
-- `setText()` updates as the task advances
-- `close()` when the operation ends or fails
-
-This avoids the blank custom XUL/HTML progress-window issue seen during earlier experiments.
-
-## Settings
-
-Preferences are stored under `extensions.zotero-ai.*`:
-
-- `chatAPIFormat`: text-model request format, `openrouter` or `openai`.
-- `chatBaseURL`: text-model API base URL, default `https://openrouter.ai/api/v1`.
-- `chatApiKey`: text-model API key. If empty, the legacy `openrouterApiKey` is used as a fallback.
-- `multimodalAPIFormat`: multimodal request format, `openrouter` or `openai`.
-- `multimodalBaseURL`: multimodal-model API base URL.
-- `multimodalApiKey`: multimodal-model API key.
-- `embeddingAPIFormat`: embedding request format, `openrouter` or `openai`.
-- `embeddingBaseURL`: embedding-model API base URL.
-- `embeddingApiKey`: embedding-model API key.
-- `chatModel`: selected chat model preset or `custom`.
-- `customChatModel`: model id used when `chatModel = custom`.
-- `embeddingModel`: selected embedding model preset or `custom`.
-- `customEmbeddingModel`: embedding model id used when `embeddingModel = custom`.
-- `pdfMode`: `local-first` or `openrouter-pdf`.
-- `maxSummaryChunks`: maximum number of summary chunks; `0` means unlimited.
-- `summaryExcludeTrailingPages`: number of final PDF pages to skip when page text is available.
-- `referenceTopK`: number of citation-search results requested from semantic recall.
-
-## Development
-
-```powershell
-npm run validate
-npm run build
-npm run diagnose
-```
-
-The build script creates:
-
-```text
-dist/zotero-ai-assistant-0.1.34.xpi
-```
-
-## Install For Testing
-
-1. Run `npm run build`.
+1. Download the latest `.xpi` file from the [Releases](../../releases) page.
 2. Open Zotero.
-3. Go to `Tools -> Plugins`.
-4. Drag `dist/zotero-ai-assistant-0.1.34.xpi` into the plugin window.
-5. Restart Zotero if prompted.
+3. Go to **Tools → Plugins**.
+4. Drag the `.xpi` file into the Plugins window, or click the gear icon and choose **Install Plugin From File…**
+5. Restart Zotero when prompted.
 
-## Implementation Notes
+After restarting, three new icon buttons appear in the right-side navigation bar of Zotero.
 
-Embedding APIs work on text input, not a complete PDF file. The plugin therefore follows a RAG-style pipeline: obtain PDF text, normalize and chunk locally, embed chunks through the configured embedding endpoint, store vectors locally, semantically recall chunks, and use the text model only for generation/reranking.
+---
 
-The extension currently uses Zotero internal UI selectors for the right-side `sidenav`, because Zotero's reader and item panes vary across versions. The selectors are kept narrow enough to avoid the old top-toolbar injection path, and the mutation observer only re-injects the right-side button group.
+## API Setup
+
+The plugin calls AI models through an API. You need an API key before any feature will work.
+
+### Getting an OpenRouter API Key (recommended)
+
+OpenRouter is a service that provides access to many AI models (GPT-5.6 Luna, Claude, Gemini, DeepSeek, and more) through a single API key. It uses pay-as-you-go pricing; most requests cost a fraction of a cent.
+
+1. Go to [openrouter.ai](https://openrouter.ai) and create a free account.
+2. Go to **Keys** in your dashboard and click **Create Key**.
+3. Copy the key — it starts with `sk-or-`.
+
+### Configuring the API Key in Zotero
+
+1. In Zotero, open **Edit → Settings** (Windows/Linux) or **Zotero → Settings** (macOS).
+2. Click the **Zotero AI** tab.
+3. Paste your API key into the **Text Model API Key** field.
+4. Paste the same key into the **Embedding Model API Key** field (required for citation search).
+5. Click **Save Settings**.
+
+> The default API address and pre-selected models work out of the box with OpenRouter. You do not need to change anything else to get started.
+
+---
+
+## Features
+
+The plugin adds three icon buttons to the right-side navigation bar in Zotero. All three actions are also available by right-clicking any item in your library under the **AI …** menu.
+
+---
+
+### 1. Read Paper
+
+**What it does:** Reads the full text of a selected paper's PDF and generates a structured reading note in Chinese, saved automatically as a child note attached to the paper.
+
+**How to use:**
+
+1. Open a paper in the Zotero PDF reader, or select a paper in your library that has a PDF attachment.
+2. Click the **Read Paper** button (document icon) in the right-side navigation bar.
+3. A progress indicator appears. The plugin extracts the PDF text, sends it to the AI, and saves the result.
+4. When complete, a new child note appears under the paper.
+
+**What the note includes:**
+- Research question and objectives
+- Methodology
+- Key findings and contributions
+- Limitations and future directions
+
+**Tips:**
+- You can cap the number of text chunks processed in **Settings → Summary Max Chunks** to reduce cost. Setting it to `0` uses the full paper.
+- The last few pages are excluded by default (usually reference lists). Adjust this in **Settings → Summary Exclude Trailing Pages**.
+- The model label is included at the start of the note so you know which AI generated it.
+
+
+---
+
+### 2. Find Citations
+
+**What it does:** Searches your entire Zotero library for papers semantically related to an idea or claim you type in. It finds conceptually related papers even if they use different words.
+
+**How to use:**
+
+1. Click the **Find Citations** button (quote-search icon) in the right-side navigation bar.
+2. A search panel opens. Type your idea or claim — for example: *"attention mechanisms improve performance in long-document tasks"*.
+3. Click **Search**.
+4. The plugin searches your local library index and displays the most relevant papers, each with a short reason and an excerpt.
+
+**First-time use — building the index:**
+
+Citation search requires a local index built from your library's PDFs. On your first search, the plugin will ask whether to build the index now. Click **OK** and wait — indexing a few hundred papers typically takes a few minutes.
+
+- The index covers only papers visible in the current Zotero view. Switch to **My Library** to index your entire library.
+- You can also rebuild the index at any time from **Settings → Rebuild Index for Current View**.
+- If you change the embedding model, the old index is cleared automatically and you will be prompted to rebuild.
+
+---
+
+### 3. Answer Note Questions
+
+**What it does:** Reads a question written in a Zotero note and appends an AI-generated answer using the parent paper's full text as context.
+
+**How to use:**
+
+1. Open a Zotero note that is attached to a paper (child note).
+2. Write your question at the end of the note in one of these formats:
+   ```
+   Q: What does this paper say about data augmentation?
+   ```
+   or in Chinese:
+   ```
+   问题: 这篇文章的主要局限性是什么？
+   ```
+3. Click the **Answer Note Question** button (question-mark chat icon) in the right-side navigation bar.
+4. The plugin reads the parent paper's PDF and appends an `Answer:` section to the note.
+
+**Tips:**
+- You can have multiple Q&A pairs in one note. The plugin answers only the **last unanswered** question.
+- To ask another question after receiving an answer, write a new `Q:` at the end of the note.
+
+
+---
+
+### 4. Explain Figures and Formulas
+
+**What it does:** A small sparkle button (✨) appears on image annotations in the PDF reader sidebar. Clicking it sends the image to the AI multimodal model and writes an explanation into the annotation comment.
+
+**How to use:**
+
+1. Open a paper in the Zotero PDF reader.
+2. Use the **Area Annotation** tool (the rectangle selector) to select a figure, chart, or equation region.
+3. The annotation appears in the right-side annotation list. A small sparkle icon (✨) appears in the top-right corner of the annotation card.
+4. Click the sparkle icon.
+5. The AI explanation is written into the annotation's comment field — visible when you hover over or open the annotation.
+
+**Tips:**
+- To ask a specific question, write `Q: your question` in the annotation comment before clicking the sparkle button. The AI will answer that question instead of giving a generic explanation.
+- This feature uses the **Multimodal Model** setting, which defaults to Gemini 3.6 Flash.
+
+---
+
+## Advanced Settings
+
+Open Zotero Settings and click the **Zotero AI** tab to access all options.
+
+### AI Model Selection
+
+| Model type | Default | Used for |
+|---|---|---|
+| Text Model | DeepSeek V4 Flash | Paper reading, citation reranking, note Q&A |
+| Multimodal Model | Gemini 3.6 Flash | Figure/annotation explanation |
+| Embedding Model | Nemotron Embed 1B (free) | Building and searching the citation index |
+
+Select a different model from the dropdown, or choose **Custom model id** and type any model ID supported by your API provider.
+
+### Using a Different API Provider
+
+If you have an API key from OpenAI, Anthropic, or another OpenAI-compatible service:
+
+1. Change the **API Format** for the relevant model type from `OpenRouter` to `OpenAI Compatible`.
+2. Enter the full API base URL (e.g., `https://api.openai.com/v1`).
+3. Enter your API key.
+4. Enter the exact model ID (e.g., `gpt-4o`).
+
+### Index Settings
+
+- **Summary Max Chunks (0 = unlimited):** Caps how much text is sent when reading a paper. Lower values are faster and cheaper but may miss details.
+- **Summary Exclude Trailing Pages:** Pages to skip from the end of each PDF (typically reference lists). Default is 2.
+- **Citation Result Count:** How many results the citation search returns. Default is 5.
+
+### PDF Mode
+
+- **Local text first (default):** Uses text already indexed by Zotero. Fast and free.
+- **Remote PDF parser/OCR fallback:** If local text is unavailable (e.g., a scanned PDF), the plugin sends the PDF to the remote API for parsing. This uses more API tokens.
+
+
+---
+
+## Troubleshooting
+
+**"Please select a paper with a PDF attachment"**
+Select a Zotero item that has a PDF before clicking Read Paper.
+
+**"No unanswered question found"**
+Make sure your note ends with a `Q:` or `问题:` line that does not already have a following `Answer:` block.
+
+**Citation search returns no results**
+The index may be empty or out of date. In the search panel, confirm when asked to rebuild, or go to Settings and click **Rebuild Index for Current View**.
+
+**API errors / "API key not set"**
+Go to Settings and make sure the API key field for the relevant model type is filled in. Verify the API base URL matches your provider.
+
+**The sparkle button does not appear on annotations**
+The button only appears on image/area annotations, not text highlight annotations. Use the area selection tool to create the annotation.
+
+**Changing the embedding model clears my index**
+This is intentional — vectors built with one model cannot be searched with another. Rebuild the index after switching models.
+
