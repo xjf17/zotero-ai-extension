@@ -8,15 +8,23 @@ Compatible with Zotero 7, 8, and 9.
 
 ## Table of Contents
 
-1. [Installation](#installation)
-2. [API Setup](#api-setup)
-3. [Features](#features)
-   - [Read Paper](#1-read-paper)
-   - [Find Citations](#2-find-citations)
-   - [Answer Note Questions](#3-answer-note-questions)
-   - [Explain Figures and Formulas](#4-explain-figures-and-formulas)
-4. [Advanced Settings](#advanced-settings)
-5. [Troubleshooting](#troubleshooting)
+- [Zotero AI Assistant](#zotero-ai-assistant)
+  - [Table of Contents](#table-of-contents)
+  - [Installation](#installation)
+  - [API Setup](#api-setup)
+    - [Getting an OpenRouter API Key (recommended)](#getting-an-openrouter-api-key-recommended)
+    - [Configuring the API Key in Zotero](#configuring-the-api-key-in-zotero)
+  - [Features](#features)
+    - [1. Read Paper](#1-read-paper)
+    - [2. Find Citations](#2-find-citations)
+    - [3. Answer Note Questions](#3-answer-note-questions)
+    - [4. Explain Figures and Formulas](#4-explain-figures-and-formulas)
+  - [Advanced Settings](#advanced-settings)
+    - [AI Model Selection](#ai-model-selection)
+    - [Using a Different API Provider](#using-a-different-api-provider)
+    - [Index Settings](#index-settings)
+    - [PDF Mode](#pdf-mode)
+  - [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -119,10 +127,7 @@ Citation search requires a local index built from your library's PDFs. On your f
    ```
    Q: What does this paper say about data augmentation?
    ```
-   or in Chinese:
-   ```
-   问题: 这篇文章的主要局限性是什么？
-   ```
+
 3. Click the **Answer Note Question** button (question-mark chat icon) in the right-side navigation bar.
 4. The plugin reads the parent paper's PDF and appends an `Answer:` section to the note.
 
