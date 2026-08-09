@@ -1,7 +1,7 @@
-/* global document, window, Zotero */
+/* global document, window, MutationObserver, Zotero */
 (function () {
   const BRANCH = "extensions.zotero-ai.";
-  let initialized = false;
+  let initializedRoot = null;
 
   function $(id) {
     return document.getElementById(id);
@@ -37,11 +37,21 @@
   }
 
   function loadPrefs() {
-    setValue("zotero-ai-api-key", pref("openrouterApiKey", ""));
-    setValue("zotero-ai-chat-model", pref("chatModel", "google/gemini-flash-latest"));
+    setValue("zotero-ai-chat-api-format", pref("chatAPIFormat", "openrouter"));
+    setValue("zotero-ai-chat-base-url", pref("chatBaseURL", "https://openrouter.ai/api/v1"));
+    setValue("zotero-ai-chat-api-key", pref("chatApiKey", pref("openrouterApiKey", "")));
+    setValue("zotero-ai-chat-model", pref("chatModel", "deepseek/deepseek-v4-flash-0731"));
     setValue("zotero-ai-custom-chat-model", pref("customChatModel", ""));
-    setValue("zotero-ai-embedding-model", pref("embeddingModel", "openai/text-embedding-3-small"));
+    setValue("zotero-ai-multimodal-api-format", pref("multimodalAPIFormat", "openrouter"));
+    setValue("zotero-ai-multimodal-base-url", pref("multimodalBaseURL", "https://openrouter.ai/api/v1"));
+    setValue("zotero-ai-multimodal-api-key", pref("multimodalApiKey", pref("openrouterApiKey", "")));
+    setValue("zotero-ai-embedding-model", pref("embeddingModel", "nvidia/nemotron-3-embed-1b:free"));
     setValue("zotero-ai-custom-embedding-model", pref("customEmbeddingModel", ""));
+    setValue("zotero-ai-multimodal-model", pref("multimodalModel", "google/gemini-3.6-flash"));
+    setValue("zotero-ai-custom-multimodal-model", pref("customMultimodalModel", ""));
+    setValue("zotero-ai-embedding-api-format", pref("embeddingAPIFormat", "openrouter"));
+    setValue("zotero-ai-embedding-base-url", pref("embeddingBaseURL", "https://openrouter.ai/api/v1"));
+    setValue("zotero-ai-embedding-api-key", pref("embeddingApiKey", pref("openrouterApiKey", "")));
     setValue("zotero-ai-pdf-mode", pref("pdfMode", "local-first"));
     setValue("zotero-ai-summary-chunks", pref("maxSummaryChunks", 0));
     setValue("zotero-ai-summary-exclude-pages", pref("summaryExcludeTrailingPages", 2));
@@ -49,11 +59,21 @@
   }
 
   function savePrefs() {
-    setPref("openrouterApiKey", getValue("zotero-ai-api-key").trim());
+    setPref("chatAPIFormat", getValue("zotero-ai-chat-api-format"));
+    setPref("chatBaseURL", getValue("zotero-ai-chat-base-url").trim());
+    setPref("chatApiKey", getValue("zotero-ai-chat-api-key").trim());
     setPref("chatModel", getValue("zotero-ai-chat-model"));
     setPref("customChatModel", getValue("zotero-ai-custom-chat-model").trim());
+    setPref("multimodalAPIFormat", getValue("zotero-ai-multimodal-api-format"));
+    setPref("multimodalBaseURL", getValue("zotero-ai-multimodal-base-url").trim());
+    setPref("multimodalApiKey", getValue("zotero-ai-multimodal-api-key").trim());
     setPref("embeddingModel", getValue("zotero-ai-embedding-model"));
     setPref("customEmbeddingModel", getValue("zotero-ai-custom-embedding-model").trim());
+    setPref("multimodalModel", getValue("zotero-ai-multimodal-model"));
+    setPref("customMultimodalModel", getValue("zotero-ai-custom-multimodal-model").trim());
+    setPref("embeddingAPIFormat", getValue("zotero-ai-embedding-api-format"));
+    setPref("embeddingBaseURL", getValue("zotero-ai-embedding-base-url").trim());
+    setPref("embeddingApiKey", getValue("zotero-ai-embedding-api-key").trim());
     setPref("pdfMode", getValue("zotero-ai-pdf-mode"));
     setPref("maxSummaryChunks", Number(getValue("zotero-ai-summary-chunks") || 0));
     setPref("summaryExcludeTrailingPages", Number(getValue("zotero-ai-summary-exclude-pages") || 0));
@@ -88,10 +108,11 @@
   }
 
   function init() {
-    if (initialized || !$("zotero-ai-preferences")) {
+    const root = $("zotero-ai-preferences");
+    if (!root || initializedRoot === root) {
       return;
     }
-    initialized = true;
+    initializedRoot = root;
     loadPrefs();
     $("zotero-ai-save-prefs")?.addEventListener("click", savePrefs);
     $("zotero-ai-rebuild-index")?.addEventListener("click", rebuildIndex);
@@ -99,5 +120,14 @@
 
   window.addEventListener("load", init);
   window.addEventListener("DOMContentLoaded", init);
+  try {
+    new MutationObserver(init).observe(document.documentElement, {
+      childList: true,
+      subtree: true
+    });
+  }
+  catch (err) {
+    // Some Zotero preference contexts may not expose MutationObserver early.
+  }
   init();
 }).call(this);

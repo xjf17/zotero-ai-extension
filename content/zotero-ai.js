@@ -1,6 +1,12 @@
 (function () {
   const PREF_BRANCH = "extensions.zotero-ai.";
   const PLUGIN_NS = "zotero-ai";
+  const MATH_OUTPUT_INSTRUCTIONS = [
+    "数学公式必须使用 Zotero 可渲染的 LaTeX 定界符。",
+    "行内公式使用单个美元符号包裹，例如 $x_i$。",
+    "独立公式使用单独成行的 $$、公式内容、单独成行的 $$。",
+    "不要使用 \\(...\\) 或 \\[...\\]，不要把公式放进代码块。"
+  ].join("");
 
   const DEFAULTS = {
     chunkSize: 500,
@@ -12,6 +18,7 @@
     embedBatchSize: 24,
     requestTimeoutMs: 60000
   };
+  const DEFAULT_API_BASE_URL = "https://openrouter.ai/api/v1";
 
   const SELECTORS = {
     sideNav: [
@@ -61,6 +68,28 @@
       .trim();
   }
 
+  function normalizeAPIBaseURL(value, fallback = DEFAULT_API_BASE_URL) {
+    let baseURL = String(value || fallback).trim();
+    if (!baseURL) {
+      baseURL = fallback;
+    }
+    if (!/^https?:\/\//i.test(baseURL)) {
+      baseURL = `https://${baseURL}`;
+    }
+    return baseURL
+      .replace(/\/(?:chat\/completions|embeddings)$/i, "")
+      .replace(/\/+$/, "");
+  }
+
+  function isOpenRouterURL(baseURL) {
+    try {
+      return /(^|\.)openrouter\.ai$/i.test(new URL(baseURL).hostname);
+    }
+    catch (err) {
+      return false;
+    }
+  }
+
   function normalizePositiveInt(value, fallback, min = 0, max = Infinity) {
     const number = Number(value);
     if (!Number.isFinite(number)) {
@@ -98,11 +127,127 @@
       .join("\n");
   }
 
+  function mathToNoteHTML(content, display) {
+    const formula = String(content || "").trim();
+    if (!formula) {
+      return "";
+    }
+    const escaped = escapeHTML(formula);
+    return display
+      ? `<pre class="math">$$${escaped}$$</pre>`
+      : `<span class="math">$${escaped}$</span>`;
+  }
+
+  function isEscaped(text, index) {
+    let slashes = 0;
+    for (let i = index - 1; i >= 0 && text[i] === "\\"; i--) {
+      slashes++;
+    }
+    return slashes % 2 === 1;
+  }
+
   function inlineMarkdownToHTML(text) {
-    return escapeHTML(text)
+    const source = String(text || "");
+    const formulas = [];
+    let masked = "";
+    let index = 0;
+
+    function addFormula(content) {
+      const placeholder = `ZOTEROAIMATH${formulas.length}TOKEN`;
+      formulas.push({ placeholder, content });
+      masked += placeholder;
+    }
+
+    while (index < source.length) {
+      if (source[index] === "`") {
+        const end = source.indexOf("`", index + 1);
+        if (end !== -1) {
+          masked += source.slice(index, end + 1);
+          index = end + 1;
+          continue;
+        }
+      }
+
+      if (source.startsWith("\\(", index)) {
+        const end = source.indexOf("\\)", index + 2);
+        if (end !== -1) {
+          const formula = source.slice(index + 2, end).trim();
+          if (formula) {
+            addFormula(formula);
+            index = end + 2;
+            continue;
+          }
+        }
+      }
+
+      if (source[index] === "$"
+        && source[index + 1] !== "$"
+        && !isEscaped(source, index)) {
+        let end = index + 1;
+        while (end < source.length) {
+          if (source[end] === "$"
+            && source[end - 1] !== "$"
+            && source[end + 1] !== "$"
+            && !isEscaped(source, end)) {
+            break;
+          }
+          end++;
+        }
+        if (end < source.length) {
+          const formula = source.slice(index + 1, end).trim();
+          if (formula) {
+            addFormula(formula);
+            index = end + 1;
+            continue;
+          }
+        }
+      }
+
+      masked += source[index];
+      index++;
+    }
+
+    let html = escapeHTML(masked)
       .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
       .replace(/`([^`]+)`/g, "<code>$1</code>")
       .replace(/\*([^*\n]+)\*/g, "<em>$1</em>");
+
+    for (const formula of formulas) {
+      html = html.split(formula.placeholder).join(mathToNoteHTML(formula.content, false));
+    }
+    return html;
+  }
+
+  function readDisplayMath(lines, startIndex) {
+    const line = lines[startIndex].trim();
+    const bracketed = line.match(/^\\\[\s*([\s\S]*?)\s*\\\]$/);
+    if (bracketed?.[1]?.trim()) {
+      return { content: bracketed[1].trim(), endIndex: startIndex };
+    }
+    const dollarDelimited = line.match(/^\$\$\s*([\s\S]*?)\s*\$\$$/);
+    if (dollarDelimited?.[1]?.trim()) {
+      return { content: dollarDelimited[1].trim(), endIndex: startIndex };
+    }
+
+    if (line !== "\\[" && line !== "$$") {
+      return null;
+    }
+    const closing = line === "\\[" ? "\\]" : "$$";
+    for (let i = startIndex + 1; i < lines.length; i++) {
+      if (lines[i].trim() === closing) {
+        return {
+          content: lines.slice(startIndex + 1, i).join("\n").trim(),
+          endIndex: i
+        };
+      }
+    }
+    return null;
+  }
+
+  function normalizeMathDelimiters(text) {
+    return String(text || "")
+      .replace(/\\\[([\s\S]*?)\\\]/g, (_, formula) => `$$\n${formula.trim()}\n$$`)
+      .replace(/\\\(([\s\S]*?)\\\)/g, (_, formula) => `$${formula.trim()}$`);
   }
 
   function flushList(out, list) {
@@ -131,8 +276,19 @@
       paragraph = [];
     }
 
-    for (const rawLine of lines) {
+    for (let i = 0; i < lines.length; i++) {
+      const rawLine = lines[i];
       const line = rawLine.trim();
+      const displayMath = readDisplayMath(lines, i);
+      if (displayMath) {
+        flushParagraph();
+        list = flushList(out, list);
+        if (displayMath.content) {
+          out.push(mathToNoteHTML(displayMath.content, true));
+        }
+        i = displayMath.endIndex;
+        continue;
+      }
       if (!line) {
         flushParagraph();
         list = flushList(out, list);
@@ -370,11 +526,14 @@
       const readers = Zotero.Reader?._readers || Zotero.Reader?.readers || [];
       const list = Array.isArray(readers) ? readers : Object.values(readers);
       const tabID = win.Zotero_Tabs?.selectedID || win.Zotero_Tabs?._selectedID;
+      // Only match by tab ID — never fall back to _window/_iframeWindow, which
+      // would pick up a stale reader from a previously opened tab.
+      if (!tabID) {
+        return null;
+      }
       return list.find((reader) =>
         reader?.tabID === tabID
         || reader?._tabID === tabID
-        || reader?._iframeWindow === win
-        || reader?._window === win
       ) || null;
     }
     catch (err) {
@@ -548,6 +707,10 @@
 
   function getItemTitle(item) {
     return item?.getField?.("title") || item?.getDisplayTitle?.() || "Untitled";
+  }
+
+  function truncateTitle(title, max = 35) {
+    return title.length > max ? title.slice(0, max) + "…" : title;
   }
 
   function getCreators(item) {
@@ -883,53 +1046,139 @@
     return JSON.parse(candidate.slice(start, end + 1));
   }
 
-  class OpenRouterClient {
-    constructor() {
-      this.baseURL = "https://openrouter.ai/api/v1";
+  // Parse annotation comment text for the last unanswered Q: (same logic as the note Q:/A: system).
+  // Returns { question: string|null, hasUnanswered: boolean }.
+  function parseAnnotationComment(text) {
+    const plain = normalizeText(text || "");
+    if (!plain) {
+      return { question: null, hasUnanswered: false };
+    }
+    const markerRE = /(?:^|\n)\s*(Q|Question|A|Answer)\s*[:：]/gi;
+    const markers = Array.from(plain.matchAll(markerRE)).map((match) => ({
+      type: /^(Q|Question)$/i.test(match[1]) ? "question" : "answer",
+      index: match.index || 0,
+      end: (match.index || 0) + match[0].length
+    }));
+    for (let i = markers.length - 1; i >= 0; i--) {
+      const marker = markers[i];
+      if (marker.type !== "question") {
+        continue;
+      }
+      const next = markers[i + 1];
+      // If the very next marker after this Q: is an A:, this question is already answered.
+      if (next?.type === "answer") {
+        continue;
+      }
+      const question = normalizeText(plain.slice(marker.end, next?.index ?? plain.length));
+      if (!question) {
+        continue;
+      }
+      return { question, hasUnanswered: true };
+    }
+    return { question: null, hasUnanswered: false };
+  }
+
+  class OpenAICompatibleClient {
+    getModelSettings(kind = "text") {
+      const settings = {
+        text: {
+          label: "文本模型",
+          formatPref: "chatAPIFormat",
+          baseURLPref: "chatBaseURL",
+          apiKeyPref: "chatApiKey",
+          modelPref: "chatModel",
+          customModelPref: "customChatModel",
+          defaultModel: "deepseek/deepseek-v4-flash-0731"
+        },
+        multimodal: {
+          label: "多模态模型",
+          formatPref: "multimodalAPIFormat",
+          baseURLPref: "multimodalBaseURL",
+          apiKeyPref: "multimodalApiKey",
+          modelPref: "multimodalModel",
+          customModelPref: "customMultimodalModel",
+          defaultModel: "google/gemini-3.6-flash"
+        },
+        embedding: {
+          label: "Embedding 模型",
+          formatPref: "embeddingAPIFormat",
+          baseURLPref: "embeddingBaseURL",
+          apiKeyPref: "embeddingApiKey",
+          modelPref: "embeddingModel",
+          customModelPref: "customEmbeddingModel",
+          defaultModel: "nvidia/nemotron-3-embed-1b:free"
+        }
+      }[kind] || null;
+      if (!settings) {
+        throw new Error(`未知的模型类型：${kind}`);
+      }
+
+      const configuredModel = String(pref(settings.modelPref, settings.defaultModel)).trim();
+      const model = configuredModel === "custom"
+        ? String(pref(settings.customModelPref, "")).trim()
+        : configuredModel;
+      const apiKey = String(
+        pref(settings.apiKeyPref, "") || pref("openrouterApiKey", "")
+      ).trim();
+      return {
+        ...settings,
+        format: pref(settings.formatPref, "openrouter") === "openai"
+          ? "openai"
+          : "openrouter",
+        baseURL: normalizeAPIBaseURL(pref(settings.baseURLPref, DEFAULT_API_BASE_URL)),
+        apiKey,
+        model: model || settings.defaultModel
+      };
     }
 
     get apiKey() {
-      return String(pref("openrouterApiKey", "")).trim();
+      return this.getModelSettings("text").apiKey;
     }
 
     get chatModel() {
-      const configured = pref("chatModel", "deepseek/deepseek-v4-flash-0731");
-      if (configured === "custom") {
-        return pref("customChatModel", "").trim() || "deepseek/deepseek-v4-flash-0731";
-      }
-      return configured;
+      return this.getModelSettings("text").model;
     }
 
     get embeddingModel() {
-      const configured = pref("embeddingModel", "nvidia/nemotron-3-embed-1b:free");
-      if (configured === "custom") {
-        return pref("customEmbeddingModel", "").trim() || "nvidia/nemotron-3-embed-1b:free";
-      }
-      return configured;
+      return this.getModelSettings("embedding").model;
     }
 
-    ensureConfigured() {
-      if (!this.apiKey) {
-        throw new Error("请先在 Zotero 设置中填写 OpenRouter API Key。");
-      }
+    get multimodalModel() {
+      return this.getModelSettings("multimodal").model;
     }
 
-    async request(path, body) {
-      this.ensureConfigured();
+    ensureConfigured(kind = "text") {
+      const config = this.getModelSettings(kind);
+      if (!config.baseURL) {
+        throw new Error(`请先在 Zotero 设置中填写${config.label} API 地址。`);
+      }
+      if (!config.model) {
+        throw new Error(`请先在 Zotero 设置中填写${config.label}模型名。`);
+      }
+      return config;
+    }
+
+    async request(kind, path, body) {
+      const config = this.ensureConfigured(kind);
       const timeoutMs = DEFAULTS.requestTimeoutMs;
-      const fetchPromise = fetch(`${this.baseURL}${path}`, {
+      const headers = {
+        "Content-Type": "application/json"
+      };
+      if (config.apiKey) {
+        headers.Authorization = `Bearer ${config.apiKey}`;
+      }
+      if (config.format === "openrouter" || isOpenRouterURL(config.baseURL)) {
+        headers["HTTP-Referer"] = "https://www.zotero.org";
+        headers["X-Title"] = "Zotero AI Assistant";
+      }
+      const fetchPromise = fetch(`${config.baseURL}${path}`, {
         method: "POST",
-        headers: {
-          "Authorization": `Bearer ${this.apiKey}`,
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://www.zotero.org",
-          "X-Title": "Zotero AI Assistant"
-        },
+        headers,
         body: JSON.stringify(body)
       });
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => {
-          reject(new Error(`OpenRouter 请求超时（超过 ${timeoutMs / 1000}s），请检查网络或稍后重试。`));
+          reject(new Error(`${config.label} API 请求超时（超过 ${timeoutMs / 1000}s），请检查网络或稍后重试。`));
         }, timeoutMs);
       });
       const response = await Promise.race([fetchPromise, timeoutPromise]);
@@ -944,21 +1193,23 @@
       }
 
       if (!response.ok) {
-        const message = payload?.error?.message || response.statusText || "OpenRouter request failed";
-        throw new Error(`OpenRouter ${response.status}: ${message}`);
+        const message = payload?.error?.message || response.statusText || "API request failed";
+        throw new Error(`${config.label} API ${response.status}: ${message}`);
       }
       return payload;
     }
 
     async chat(messages, options = {}) {
-      const payload = await this.request("/chat/completions", {
-        model: options.model || this.chatModel,
+      const kind = options.modelType || "text";
+      const config = this.ensureConfigured(kind);
+      const payload = await this.request(kind, "/chat/completions", {
+        model: options.model || config.model,
         messages,
         temperature: options.temperature ?? 0.2
       });
       const content = payload?.choices?.[0]?.message?.content;
       if (!content) {
-        throw new Error("OpenRouter 没有返回可用回答。");
+        throw new Error(`${config.label} API 没有返回可用回答。`);
       }
       return typeof content === "string"
         ? content
@@ -967,13 +1218,14 @@
 
     async embed(texts) {
       const input = Array.isArray(texts) ? texts : [texts];
-      const payload = await this.request("/embeddings", {
-        model: this.embeddingModel,
+      const config = this.ensureConfigured("embedding");
+      const payload = await this.request("embedding", "/embeddings", {
+        model: config.model,
         input
       });
       const data = payload?.data;
       if (!Array.isArray(data)) {
-        throw new Error("OpenRouter embeddings 返回格式异常。");
+        throw new Error("Embedding API 返回格式异常。");
       }
       return data
         .sort((a, b) => (a.index || 0) - (b.index || 0))
@@ -999,7 +1251,36 @@
           ]
         }
       ], {
+        modelType: "multimodal",
         temperature: 0
+      });
+    }
+
+    // Explain an image annotation (figure/formula) using a multimodal model.
+    // textContext: surrounding page text; question: optional user question from Q: marker.
+    async explainWithVision(imageBase64, textContext, question) {
+      const userParts = [];
+      if (textContext) {
+        userParts.push({ type: "text", text: textContext });
+      }
+      userParts.push({
+        type: "image_url",
+        image_url: { url: `data:image/png;base64,${imageBase64}` }
+      });
+      const questionText = question
+        ? `请根据以上上下文和图片回答：${question}`
+        : "请详细解释上图中的图表或公式，包括其含义、关键参数和在论文中的作用。";
+      userParts.push({ type: "text", text: questionText });
+      return this.chat([
+        {
+          role: "system",
+          content: "你是学术论文图表和公式解释助手。请根据提供的页面文字上下文和图像，详细解释图表或公式的含义、关键参数和在论文中的作用。回答应准确、完整，基于提供的材料。" + MATH_OUTPUT_INSTRUCTIONS
+        },
+        { role: "user", content: userParts }
+      ], {
+        modelType: "multimodal",
+        model: this.multimodalModel,
+        temperature: 0.2
       });
     }
   }
@@ -1039,7 +1320,7 @@
 
       const mode = options.forcePdfParser ? "openrouter-pdf" : pref("pdfMode", "local-first");
       if (mode !== "openrouter-pdf") {
-        throw new Error("没有找到 Zotero 已索引的 PDF 文本。请先让 Zotero 完成 PDF 全文索引，或在设置中切换到 OpenRouter PDF parser/OCR。");
+        throw new Error("没有找到 Zotero 已索引的 PDF 文本。请先让 Zotero 完成 PDF 全文索引，或在设置中启用远程 PDF parser/OCR fallback。");
       }
 
       const path = await getAttachmentPath(attachment);
@@ -1047,7 +1328,7 @@
       const text = await this.client.parsePdfBase64(base64);
       const normalized = normalizeText(text);
       if (normalized.length < 100) {
-        throw new Error("OpenRouter PDF parser/OCR 没有提取到足够文本。");
+        throw new Error("远程 PDF parser/OCR 没有提取到足够文本。");
       }
       return {
         text: normalized,
@@ -1062,9 +1343,11 @@
     constructor(client, textSource) {
       this.client = client;
       this.textSource = textSource;
+      this._modelChangedOnLoad = false;
     }
 
     async load(libraryID) {
+      this._modelChangedOnLoad = false;
       const index = await readJSON(getIndexPath(libraryID), {
         version: 1,
         libraryID,
@@ -1072,6 +1355,7 @@
         items: {}
       });
       if (index.embeddingModel !== this.client.embeddingModel) {
+        this._modelChangedOnLoad = true;
         index.embeddingModel = this.client.embeddingModel;
         index.items = {};
       }
@@ -1110,13 +1394,13 @@
         const index = await this.load(libraryID);
         for (let i = 0; i < libraryItems.length; i++) {
           const item = libraryItems[i];
-          progressCallback?.(`正在索引 ${i + 1}/${libraryItems.length}: ${getItemTitle(item)}`);
+          progressCallback?.(`正在索引 ${i + 1}/${libraryItems.length}: ${truncateTitle(getItemTitle(item))}`);
           try {
             await this.indexItem(index, item, chunkOptions);
             indexed++;
           }
           catch (err) {
-            failures.push(`${getItemTitle(item)}: ${err.message || err}`);
+            failures.push(`${truncateTitle(getItemTitle(item))}: ${err.message || err}`);
             Zotero.debug(`Zotero AI Assistant: index failed for item ${item.id}: ${err}\n${err.stack}`);
           }
         }
@@ -1225,13 +1509,16 @@
       this.id = id;
       this.version = version;
       this.rootURI = rootURI;
-      this.client = new OpenRouterClient();
+      this.client = new OpenAICompatibleClient();
       this.textSource = new TextSource(this.client);
       this.indexStore = new IndexStore(this.client, this.textSource);
       this.windows = new Set();
       this.menuIDs = [];
       this.runningActions = new Set();
       this.windowObservers = new WeakMap();
+      this.readerAnnotationHeaderHandler = null;
+      this.readerAnnotationHeaderEventSeen = false;
+      this.registerAnnotationHeaderHook();
     }
 
     async runOnce(key, task) {
@@ -1258,6 +1545,7 @@
       for (const win of Array.from(this.windows)) {
         this.removeFromWindow(win);
       }
+      this.unregisterAnnotationHeaderHook();
       this.unregisterContextMenus();
     }
 
@@ -1270,6 +1558,7 @@
       this.injectSideNavToolbar(win);
       this.observeWindow(win);
       this.injectContextMenu(win);
+      this.injectAnnotationExplainButtonsForWindow(win);
     }
 
     removeFromWindow(win) {
@@ -1281,6 +1570,9 @@
         currentDoc.getElementById(`${PLUGIN_NS}-toolbar`)?.remove();
         currentDoc.getElementById(`${PLUGIN_NS}-sidenav-toolbar`)?.remove();
         currentDoc.getElementById(`${PLUGIN_NS}-style`)?.remove();
+        for (const btn of Array.from(currentDoc.querySelectorAll(`.${PLUGIN_NS}-explain-btn`))) {
+          btn.remove();
+        }
       }
       doc.getElementById(`${PLUGIN_NS}-context-separator`)?.remove();
       doc.getElementById(`${PLUGIN_NS}-context-read`)?.remove();
@@ -1401,6 +1693,7 @@
           pending = false;
           try {
             this.injectSideNavToolbar(win);
+            this.injectAnnotationExplainButtonsForWindow(win);
           }
           catch (err) {
             Zotero.debug(`Zotero AI Assistant: dynamic toolbar injection failed: ${err}`);
@@ -1517,10 +1810,14 @@
     }
 
     async getActionRegularItem(win) {
+      // If the active tab is a PDF reader, process the article open there.
+      // getActiveReader() only matches by tab ID, so this correctly returns
+      // null when the library/items view is the active tab.
       const readerItem = await getReaderRegularItem(win);
       if (readerItem) {
         return readerItem;
       }
+      // Active tab is the library view — use the selected item.
       return getSelectedRegularItems(win)[0] || null;
     }
 
@@ -1542,11 +1839,13 @@
           alertUser(win, "Zotero AI", "请先选中一篇带 PDF 的文献。");
           return;
         }
-        progress.update(`正在读取: ${getItemTitle(item)}`);
+        const titleDisplay = truncateTitle(getItemTitle(item), 40);
+        progress.update(`正在读取文献: ${titleDisplay}`);
         const { text, source, pages } = await this.textSource.getTextForItem(item);
-        progress.update("正在调用模型生成论文阅读笔记...");
+        const modelLabel = modelLabelFromID(this.client.chatModel);
+        progress.update(`${modelLabel} 正在生成笔记 · ${titleDisplay}`);
         const summary = await this.summarizePaperV2(item, text, source, pages);
-        progress.update("正在保存 Zotero 笔记...");
+        progress.update(`正在保存笔记 · ${titleDisplay}`);
         await this.createChildNote(item, summary);
       }
       catch (err) {
@@ -1570,7 +1869,7 @@
       const answer = await this.client.chat([
         {
           role: "system",
-          content: "你是严谨的中文学术阅读助手。只能根据用户提供的论文文本总结，不要编造。输出清晰的中文结构化笔记。你的回答务必完整，列出所有要点之后再停止。"
+          content: "你是严谨的中文学术阅读助手。只能根据用户提供的论文文本总结，不要编造。输出清晰的中文结构化笔记。你的回答务必完整，列出所有要点之后再停止。" + MATH_OUTPUT_INSTRUCTIONS
         },
         {
           role: "user",
@@ -1609,7 +1908,7 @@
       const answer = await this.client.chat([
         {
           role: "system",
-          content: "你是严谨的中文学术阅读助手。只能根据用户提供的论文文本总结，不要编造。输出 Markdown，但不要输出开场套话，不要以“这是一份...”开头，不要在最前面输出横线。你的回答务必完整，不要遗漏任何细节。"
+          content: "你是严谨的中文学术阅读助手。只能根据用户提供的论文文本总结，不要编造。输出 Markdown，但不要输出开场套话，不要以“这是一份...”开头，不要在最前面输出横线。你的回答务必完整，不要遗漏任何细节。" + MATH_OUTPUT_INSTRUCTIONS
         },
         {
           role: "user",
@@ -1753,6 +2052,9 @@
 
     async rebuildIndexForVisibleItems(win, progressCallback, chunkOptions = {}) {
       return this.runOnce("rebuild-index", async () => {
+      // 提前校验：确保已填写 API Key
+      this.client.ensureConfigured("embedding");
+
       const items = await this.getVisibleRegularItems(win);
       if (!items.length) {
         throw new Error("当前视图没有可索引的文献。");
@@ -1776,6 +2078,10 @@
 
     async searchReferences(win, query, progressCallback) {
       return this.runOnce("search-references", async () => {
+      // 提前校验：确保已填写 API Key
+      this.client.ensureConfigured("embedding");
+      this.client.ensureConfigured("text");
+
       const normalizedQuery = normalizeText(query);
       if (!normalizedQuery) {
         throw new Error("请输入一句想法或论点。");
@@ -1790,11 +2096,10 @@
       );
 
       if (!candidates.length) {
-        const shouldBuild = confirmUser(
-          win,
-          "Zotero AI",
-          "当前文献库还没有可用向量索引。是否现在为当前视图中的文献建立索引？"
-        );
+        const reason = this.indexStore._modelChangedOnLoad
+          ? "检测到 Embedding 模型已变更，原有索引已自动清除。\n是否立即用新模型重建当前视图的索引？"
+          : "当前文献库还没有可用向量索引。是否现在为当前视图中的文献建立索引？";
+        const shouldBuild = confirmUser(win, "Zotero AI", reason);
         if (!shouldBuild) {
           return [];
         }
@@ -1837,6 +2142,7 @@
             "",
             "请从候选片段中选择最适合引用的 5 条以内结果。返回 JSON 数组，不要包含 Markdown。",
             "每项包含 id, reason, quote。",
+            "reason 中如需写数学公式，行内使用 $...$，独立公式使用 $$...$$。",
             "quote 必须是候选 excerpt 中真实存在的典型原文摘录，尽量短而完整。",
             "",
             JSON.stringify(compact, null, 2)
@@ -1870,7 +2176,7 @@
           }
           return {
             ...candidate,
-            reason: entry.reason || "与输入想法相关。",
+            reason: normalizeMathDelimiters(entry.reason || "与输入想法相关。"),
             quote: entry.quote || candidate.text.slice(0, 360)
           };
         })
@@ -1997,7 +2303,7 @@
       return this.client.chat([
         {
           role: "system",
-          content: "你是中文论文阅读问答助手。回答必须优先基于 PDF 正文全文、当前笔记和关联论文摘要。证据不足时明确说明，不要编造。你的回答应该尽量完整，不遗漏任何可能与问题相关的细节，输出完整的答案"
+          content: "你是中文论文阅读问答助手。回答必须优先基于 PDF 正文全文、当前笔记和关联论文摘要。证据不足时明确说明，不要编造。你的回答应该尽量完整，不遗漏任何可能与问题相关的细节，输出完整的答案。" + MATH_OUTPUT_INSTRUCTIONS
         },
         {
           role: "user",
@@ -2038,6 +2344,332 @@
       const appendHTML = `\n<h3>Answer:</h3>\n${markdownToNoteHTML(cleanMarkdown(answer))}`;
       note.setNote(html + appendHTML);
       await note.saveTx();
+    }
+
+    // Iterate all accessible documents in a window and inject sparkle buttons.
+    injectAnnotationExplainButtonsForWindow(win) {
+      if (!win?.document) {
+        return;
+      }
+      this.registerAnnotationHeaderHook();
+      for (const doc of getAccessibleDocuments(win.document)) {
+        if (isHTMLDocument(doc)) {
+          try {
+            this.injectAnnotationExplainButtons(doc);
+          }
+          catch (err) {
+            Zotero.debug(`Zotero AI Assistant: annotation button injection failed: ${err}`);
+          }
+        }
+      }
+    }
+
+    registerAnnotationHeaderHook() {
+      if (this.readerAnnotationHeaderHandler) {
+        return;
+      }
+      if (!Zotero.Reader?.registerEventListener) {
+        Zotero.debug("Zotero AI Assistant: Zotero.Reader is not ready; retrying Reader hook after uiReadyPromise");
+        Promise.all([Zotero.initializationPromise, Zotero.uiReadyPromise])
+          .then(() => this.registerAnnotationHeaderHook())
+          .catch((err) => Zotero.debug(`Zotero AI Assistant: Reader hook retry failed: ${err}`));
+        return;
+      }
+      this.readerAnnotationHeaderHandler = (event) => {
+        try {
+          if (!this.readerAnnotationHeaderEventSeen) {
+            this.readerAnnotationHeaderEventSeen = true;
+            Zotero.debug("Zotero AI Assistant: renderSidebarAnnotationHeader fired");
+          }
+          this.injectAnnotationHeaderExplainButton(event);
+        }
+        catch (err) {
+          Zotero.debug(`Zotero AI Assistant: sidebar annotation header hook failed: ${err}`);
+        }
+      };
+      try {
+        Zotero.Reader.registerEventListener(
+          "renderSidebarAnnotationHeader",
+          this.readerAnnotationHeaderHandler,
+          this.id
+        );
+        Zotero.debug("Zotero AI Assistant: registered sidebar annotation header hook");
+      }
+      catch (err) {
+        Zotero.debug(`Zotero AI Assistant: failed to register sidebar annotation header hook: ${err}`);
+        this.readerAnnotationHeaderHandler = null;
+      }
+    }
+
+    unregisterAnnotationHeaderHook() {
+      if (!this.readerAnnotationHeaderHandler) {
+        return;
+      }
+      try {
+        Zotero.Reader?.unregisterEventListener?.(
+          "renderSidebarAnnotationHeader",
+          this.readerAnnotationHeaderHandler
+        );
+      }
+      catch (err) {
+        Zotero.debug(`Zotero AI Assistant: failed to unregister sidebar annotation header hook: ${err}`);
+      }
+      this.readerAnnotationHeaderHandler = null;
+      this.readerAnnotationHeaderEventSeen = false;
+    }
+
+    injectAnnotationHeaderExplainButton(event) {
+      const { reader, doc, params, append } = event || {};
+      const annotation = params?.annotation;
+      if (!annotation || typeof append !== "function" || !doc) {
+        return;
+      }
+      const annotationRef = annotation.key || annotation.id;
+      if (!annotationRef) {
+        return;
+      }
+      this.injectStylesForDocument(doc);
+      const libraryID = annotation.libraryID || reader?._item?.libraryID;
+      append(this.createAnnotationHeaderExplainButton(doc, annotationRef, libraryID));
+    }
+
+    createAnnotationHeaderExplainButton(doc, annotationRef, libraryID) {
+      const btn = doc.createElement("button");
+      btn.className = `${PLUGIN_NS}-explain-btn ${PLUGIN_NS}-explain-header-btn`;
+      btn.type = "button";
+      btn.title = "AI 解释图表/公式";
+      btn.setAttribute("tabindex", "0");
+      btn.setAttribute("aria-label", "AI 解释图表/公式");
+      const ico = doc.createElement("img");
+      ico.src = `${this.rootURI}content/icons/sparkle.svg`;
+      ico.alt = "";
+      btn.appendChild(ico);
+      const run = (event) => {
+        event.stopPropagation();
+        event.preventDefault();
+        this.handleExplainAnnotation(annotationRef, this.getMainWindow(), libraryID);
+      };
+      btn.addEventListener("click", run);
+      btn.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          run(event);
+        }
+      });
+      return btn;
+    }
+
+    // Inject sparkle explain buttons on image annotation cards in the PDF reader sidebar.
+    // Tries multiple attribute selectors to handle different Zotero versions.
+    injectAnnotationExplainButtons(doc) {
+      if (!doc || !isHTMLDocument(doc)) {
+        return;
+      }
+      const CARD_SELECTORS = [
+        "[data-sidebar-annotation-id]",
+        "[data-annotation-id]",
+        ".annotation"
+      ];
+      for (const selector of CARD_SELECTORS) {
+        let cards;
+        try {
+          cards = Array.from(doc.querySelectorAll(selector));
+        }
+        catch (err) {
+          continue;
+        }
+        let injected = 0;
+        for (const card of cards) {
+          if (card.querySelector(`.${PLUGIN_NS}-explain-btn`)) {
+            continue;
+          }
+          if (!card.querySelector("img")) {
+            continue;
+          }
+          const key =
+            card.dataset?.sidebarAnnotationId ||
+            card.dataset?.annotationId ||
+            card.dataset?.key ||
+            card.dataset?.id ||
+            card.closest?.("[data-sidebar-annotation-id]")?.dataset?.sidebarAnnotationId;
+          if (!key) {
+            continue;
+          }
+          this._injectExplainButton(card, key, doc);
+          injected++;
+        }
+        if (injected > 0) {
+          Zotero.debug(`Zotero AI Assistant: injected ${injected} annotation explain btn(s) via "${selector}"`);
+          break;
+        }
+      }
+    }
+
+    _injectExplainButton(card, annotationKey, doc) {
+      const btn = doc.createElement("button");
+      btn.className = `${PLUGIN_NS}-explain-btn`;
+      btn.title = "AI 解释此图表/公式";
+      const ico = doc.createElement("img");
+      ico.src = `${this.rootURI}content/icons/sparkle.svg`;
+      ico.width = 14;
+      ico.height = 14;
+      ico.alt = "✨";
+      btn.appendChild(ico);
+      btn.style.cssText = [
+        "position:absolute", "top:4px", "right:32px", "z-index:10",
+        "background:rgba(255,255,255,0.85)", "border:1px solid rgba(0,0,0,0.15)",
+        "border-radius:3px", "cursor:pointer", "padding:2px 3px", "line-height:1"
+      ].join(";");
+      const view = doc.defaultView || card.ownerGlobal;
+      if (!view?.getComputedStyle || view.getComputedStyle(card).position === "static") {
+        card.style.position = "relative";
+      }
+      const mainWin = this.getMainWindow();
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        this.handleExplainAnnotation(annotationKey, mainWin);
+      });
+      card.appendChild(btn);
+    }
+
+    async getAnnotationImageBase64(annotation) {
+      let imagePath = null;
+      try {
+        if (typeof Zotero.Annotations?.getCacheImagePath === "function") {
+          imagePath = await Zotero.Annotations.getCacheImagePath(annotation);
+        }
+      }
+      catch (err) {
+        Zotero.debug(`Zotero AI Assistant: getCacheImagePath failed: ${err}`);
+      }
+      if (!imagePath) {
+        const dataDir = Zotero.DataDirectory.dir;
+        imagePath = PathUtils.join(dataDir, "cache", String(annotation.libraryID), `${annotation.key}.png`);
+      }
+      let data;
+      try {
+        data = await IOUtils.read(imagePath);
+      }
+      catch (err) {
+        throw new Error(`无法读取注释图像（${imagePath}）：${err.message}`);
+      }
+      const bytes = new Uint8Array(data);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      return btoa(binary);
+    }
+
+    async getAnnotationPageTexts(attachment, pageIndex) {
+      const result = await Zotero.PDFWorker.getFullText(attachment.id, null);
+      const fullText = result?.text || "";
+      const pageCharRanges = result?.pageCharRanges;
+      let pages;
+      if (Array.isArray(pageCharRanges) && pageCharRanges.length > 0) {
+        pages = pageCharRanges.map(([start, end], i) => ({ index: i, text: fullText.slice(start, end) }));
+      }
+      else if (Array.isArray(result?.pages)) {
+        pages = result.pages.map((text, i) => ({ index: i, text: text || "" }));
+      }
+      else {
+        pages = [{ index: 0, text: fullText }];
+      }
+      const totalPages = pages.length;
+      const low = Math.max(0, pageIndex - 2);
+      const high = Math.min(totalPages - 1, pageIndex + 2);
+      const included = new Set([0]);
+      for (let i = low; i <= high; i++) {
+        included.add(i);
+      }
+      return Array.from(included)
+        .sort((a, b) => a - b)
+        .map((i) => {
+          const t = normalizeText(pages[i]?.text || "");
+          return t ? `【第${i + 1} 页】\n${t}` : "";
+        })
+        .filter(Boolean)
+        .join("\n\n");
+    }
+
+    async resolveAnnotation(annotationRef, libraryID) {
+      if (annotationRef?.isAnnotation?.()) {
+        return annotationRef;
+      }
+      const raw = String(annotationRef || "").trim();
+      if (!raw) {
+        return null;
+      }
+      if (/^\d+$/.test(raw)) {
+        const item = await Zotero.Items.getAsync(Number(raw));
+        return item?.isAnnotation?.() ? item : null;
+      }
+      if (libraryID) {
+        const item = Zotero.Items.getByLibraryAndKey(Number(libraryID), raw);
+        if (item?.isAnnotation?.()) {
+          return item;
+        }
+      }
+      for (const library of Zotero.Libraries.getAll()) {
+        const item = Zotero.Items.getByLibraryAndKey(library.libraryID, raw);
+        if (item?.isAnnotation?.()) {
+          return item;
+        }
+      }
+      return null;
+    }
+
+    async handleExplainAnnotation(annotationRef, win, libraryID) {
+      return this.runOnce(`explain-annotation-${libraryID || ""}-${annotationRef}`, async () => {
+        const progress = this.createProgressHandle(win, "正在准备解释图表/公式...");
+        try {
+          const annotation = await this.resolveAnnotation(annotationRef, libraryID);
+          if (!annotation) {
+            throw new Error("找不到该注释，请确认注释仍存在。");
+          }
+          const attachment = annotation.parentID
+            ? await Zotero.Items.getAsync(annotation.parentID)
+            : null;
+          if (!attachment) {
+            throw new Error("找不到注释所属的 PDF 附件。");
+          }
+          progress.update("正在读取注释图像...");
+          const imageBase64 = await this.getAnnotationImageBase64(annotation);
+          progress.update("正在提取上下文页面文字...");
+          let textContext = "";
+          try {
+            const pos = JSON.parse(annotation.annotationPosition || "{}");
+            const pageIndex = typeof pos.pageIndex === "number" ? pos.pageIndex : 0;
+            textContext = await this.getAnnotationPageTexts(attachment, pageIndex);
+          }
+          catch (err) {
+            Zotero.debug(`Zotero AI Assistant: page text extraction skipped: ${err}`);
+          }
+          const comment = annotation.annotationComment || "";
+          const { question, hasUnanswered } = parseAnnotationComment(comment);
+          const modelLabel = modelLabelFromID(this.client.multimodalModel);
+          progress.update(`正在调用 ${modelLabel} 解释图表...`);
+          const answer = await this.client.explainWithVision(imageBase64, textContext, question);
+          progress.update("正在写入注释评论...");
+          const normalizedAnswer = normalizeMathDelimiters(answer.trim());
+          const answerBlock = hasUnanswered
+            ? `A: (${modelLabel}) ${normalizedAnswer}`
+            : `(${modelLabel}) ${normalizedAnswer}`;
+          annotation.annotationComment = comment.trimEnd()
+            ? `${comment.trimEnd()}\n\n${answerBlock}`
+            : answerBlock;
+          await annotation.saveTx();
+        }
+        catch (err) {
+          Zotero.debug(`Zotero AI Assistant: explainAnnotation failed: ${err}\n${err.stack}`);
+          progress.close();
+          alertUser(win, "图表/公式解释失败", err.message || String(err));
+          return;
+        }
+        finally {
+          progress.close();
+        }
+      });
     }
 
     createProgressHandle(win, message) {
@@ -2090,5 +2722,15 @@
 
   }
 
-  this.ZoteroAI = new ZoteroAIApp();
+  const isNodeTest = typeof process === "object" && process?.versions?.node;
+  if (isNodeTest && typeof module === "object" && module.exports) {
+    module.exports = {
+      markdownToNoteHTML,
+      normalizeMathDelimiters,
+      normalizeAPIBaseURL
+    };
+  }
+  else {
+    this.ZoteroAI = new ZoteroAIApp();
+  }
 }).call(this);

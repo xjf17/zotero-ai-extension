@@ -1,6 +1,6 @@
 # Zotero AI Assistant 中文说明
 
-这是一个面向 Zotero 7-9 的 AI 辅助插件。插件通过 OpenRouter 调用聊天模型和 embedding 模型，在 Zotero 右侧功能图标栏常驻三个入口：
+这是一个面向 Zotero 7-9 的 AI 辅助插件。插件支持 OpenRouter 和 OpenAI 兼容格式的 API，默认仍使用 OpenRouter。文本、多模态和 embedding 模型可以分别配置 API 地址、接口格式、API Key 和模型名。在 Zotero 右侧功能图标栏常驻三个入口：
 
 - 读取论文
 - 查找引用
@@ -42,6 +42,41 @@
 
 打开 Zotero 或切换到 PDF 阅读界面后，直接使用右侧三个 AI 按钮即可。
 
+### 2. 数学公式输出
+
+论文摘要、笔记问答和图表/公式解释共享同一套公式输出约束：
+
+- 行内公式使用 `$...$`。
+- 独立公式使用单独成行的 `$$`、公式内容和单独成行的 `$$`。
+- 提示词要求模型不要使用 `\(...\)` 或 `\[...\]`。
+
+写入 Zotero note 前，插件会把 `$...$` 转换为 `<span class="math">` 节点，把 `$$...$$` 转换为 `<pre class="math">` 节点。即使模型仍返回 `\(...\)` 或 `\[...\]`，插件也会兼容转换。公式内容先进行 HTML 转义，LaTeX 反斜杠保持不变。
+
+引用检索结果只显示在搜索面板中，其中 `quote` 必须保持候选原文，不会为了公式格式改写原文摘录。
+
+### 3. API 配置与请求格式
+
+设置页把模型分成三类，每类都有独立的输入、输出和配置：
+
+| 模型类型 | 输入 | 请求 | 输出 |
+| --- | --- | --- | --- |
+| 文本模型 | 系统提示词、论文正文、笔记上下文或候选片段 | `${baseURL}/chat/completions` | `choices[0].message.content` |
+| 多模态模型 | 文本上下文和图片；OpenRouter PDF fallback 还会包含 PDF file 消息 | `${baseURL}/chat/completions` | `choices[0].message.content` |
+| Embedding 模型 | 一个或多个文本块 | `${baseURL}/embeddings` | 按 `data[].index` 排序后的 `data[].embedding` |
+
+每类模型都可以选择：
+
+- `OpenRouter`：默认格式，保留 OpenRouter 请求头；PDF fallback 使用 OpenRouter 的 PDF file 消息。
+- `OpenAI 兼容`：使用标准 Bearer Key、`/chat/completions` 和 `/embeddings` 路径。图片解释使用标准 `image_url` 消息。
+
+API 地址填写 base URL，不要填写完整的 `/chat/completions` 或 `/embeddings` 路径。插件会自动去掉误填的完整路径末尾。例如：
+
+- `https://openrouter.ai/api/v1`
+- `https://api.openai.com/v1`
+- `https://your-provider.example.com/v1`
+
+旧版本的 `openrouterApiKey` 不会立即失效。当新的文本、多模态或 Embedding Key 为空时，插件会回退使用它；在设置页保存一次后，新 Key 会分别保存到对应配置中。
+
 ## 二、功能一：读取论文
 
 入口：
@@ -53,7 +88,7 @@
 
 - 当前打开的 PDF，或当前选中的 Zotero 文献条目。
 - 该文献条目下应有 PDF 附件。
-- 设置页中应填写 OpenRouter API Key。
+- 设置页中应填写对应模型的 API 地址、接口格式、API Key 和模型名。
 - 设置页中应选择聊天模型和 PDF 模式。
 
 程序输入：
@@ -61,7 +96,7 @@
 - Zotero 文献 item。
 - PDF attachment。
 - Zotero 已索引的 PDF 全文或逐页文本。
-- 必要时的 OpenRouter PDF parser/OCR fallback 结果。
+- 必要时的远程 PDF parser/OCR fallback 结果。
 - 设置项：聊天模型、PDF 模式、摘要最多片段数、摘要排除末尾页数。
 
 处理步骤：
@@ -76,11 +111,11 @@
    - 再尝试读取 Zotero fulltext cache。
    - 再尝试 Zotero PDF worker。
    - 必要时请求 Zotero 建立全文索引后再次读取。
-6. 如果本地文本不可用，并且设置中的 PDF 模式允许 OpenRouter PDF parser/OCR，则插件读取 PDF 文件并调用 OpenRouter fallback。
+6. 如果本地文本不可用，并且设置中的 PDF 模式允许远程 parser/OCR，则插件读取 PDF 文件并调用多模态模型 fallback。
 7. 如果拿到了逐页文本，插件会按照“摘要排除末尾页数”去掉最后若干页，常用于排除参考文献。
 8. 插件把剩余论文文本切成摘要片段。每个片段大约 5000 字符。
 9. “摘要最多片段数”控制最多送入多少个片段。设置为 `0` 表示不限制片段数。
-10. `summarizePaperV2()` 组合文献元数据、文本来源、页码范围和论文正文片段，调用 OpenRouter 聊天模型。
+10. `summarizePaperV2()` 组合文献元数据、文本来源、页码范围和论文正文片段，调用配置好的文本模型 API。
 11. 模型返回 Markdown 格式的中文结构化论文阅读笔记。
 12. 插件清理模型输出开头不需要的说明文字。
 13. 插件把 Markdown 转换成 Zotero note 可以直接识别的 HTML。
@@ -272,21 +307,28 @@ Question: 这篇论文适合引用在哪一类论证中？
 
 设置项都存储在 `extensions.zotero-ai.*` 下。
 
-### OpenRouter API Key
+### OpenAI 兼容 API 配置
 
-输入：
+三类模型分别维护以下配置：
 
-- 用户填写的 OpenRouter API Key。
+- `chatAPIFormat`、`chatBaseURL`、`chatApiKey`：文本模型接口格式、API 地址和 Key。
+- `multimodalAPIFormat`、`multimodalBaseURL`、`multimodalApiKey`：多模态模型接口格式、API 地址和 Key。
+- `embeddingAPIFormat`、`embeddingBaseURL`、`embeddingApiKey`：Embedding 模型接口格式、API 地址和 Key。
 
-用途：
+接口格式有两个选项：
 
-- 聊天模型调用。
-- embedding 模型调用。
-- OpenRouter PDF parser/OCR fallback。
+- `openrouter`：保留 OpenRouter 请求头和 OpenRouter 的 PDF 文件输入格式。
+- `openai`：使用标准 OpenAI 兼容的 `/chat/completions` 或 `/embeddings` 请求。
 
-输出：
+默认三类模型的 API 地址都是 `https://openrouter.ai/api/v1`。已有版本中的 `openrouterApiKey` 仍会作为三个新 Key 配置为空时的兼容回退。
 
-- 保存到 Zotero preference 中。
+API 地址应填写 base URL，例如：
+
+- OpenRouter：`https://openrouter.ai/api/v1`
+- OpenAI：`https://api.openai.com/v1`
+- 其他兼容服务：按照服务商文档填写其 `/v1` base URL。
+
+Embedding 请求必须返回 OpenAI 风格的 `data[].embedding` 数组。多模态图像解释使用 OpenAI 风格的 `image_url` 消息；远程 PDF parser/OCR 的 PDF 文件消息仍依赖 OpenRouter 风格，其他服务建议优先使用本地 PDF 文本提取。
 
 ### 聊天模型
 
@@ -303,7 +345,7 @@ Question: 这篇论文适合引用在哪一类论证中？
 
 输出：
 
-- OpenRouter chat completion 请求中的 `model`。
+- 选定 API endpoint 的 `/chat/completions` 请求中的 `model`。
 
 ### Embedding 模型
 
@@ -318,19 +360,19 @@ Question: 这篇论文适合引用在哪一类论证中？
 
 输出：
 
-- OpenRouter embeddings 请求中的 `model`。
+- 选定 API endpoint 的 `/embeddings` 请求中的 `model`。
 
 ### PDF 模式
 
 可选值：
 
 - 本地文本优先。
-- OpenRouter PDF parser/OCR。
+- 远程 PDF parser/OCR。
 
 处理逻辑：
 
 - 本地文本优先时，插件只在 Zotero 已索引文本里查找 PDF 文本。
-- OpenRouter PDF parser/OCR 模式下，本地文本失败后允许把 PDF 作为 fallback 交给 OpenRouter 解析。
+- 远程 PDF parser/OCR 模式下，本地文本失败后允许把 PDF 作为 fallback 交给多模态模型解析；非 OpenRouter 服务需要确认其支持相同的 PDF file 消息格式。
 
 ### 摘要最多片段数
 
@@ -474,7 +516,7 @@ npm run diagnose
 输出文件：
 
 ```text
-dist/zotero-ai-assistant-0.1.19.xpi
+dist/zotero-ai-assistant-0.1.34.xpi
 ```
 
 安装测试步骤：
@@ -482,7 +524,7 @@ dist/zotero-ai-assistant-0.1.19.xpi
 1. 运行 `npm run build`。
 2. 打开 Zotero。
 3. 进入 `Tools -> Plugins`。
-4. 将 `dist/zotero-ai-assistant-0.1.19.xpi` 拖入插件窗口。
+4. 将 `dist/zotero-ai-assistant-0.1.34.xpi` 拖入插件窗口。
 5. 按 Zotero 提示重启。
 
 ## 十、当前实现边界

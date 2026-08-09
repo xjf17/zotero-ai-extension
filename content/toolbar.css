@@ -45,3 +45,30 @@
   padding: 3px;
   background-size: 16px 16px;
 }
+
+.zotero-ai-explain-header-btn {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  order: -1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-inline-end: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.zotero-ai-explain-header-btn:hover {
+  background-color: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+.zotero-ai-explain-header-btn img {
+  width: 15px;
+  height: 15px;
+  pointer-events: none;
+}

@@ -16,7 +16,9 @@ const requiredFiles = [
   "content/preferences-pane.css",
   "content/icons/file-text.svg",
   "content/icons/search-quote.svg",
-  "content/icons/message-circle-question.svg"
+  "content/icons/message-circle-question.svg",
+  "content/icons/sparkle.svg",
+  "tools/test-note-formatting.js"
 ];
 
 function assert(condition, message) {
@@ -50,6 +52,10 @@ for (const file of ["bootstrap.js", "content/zotero-ai.js", "content/search.js",
   });
 }
 
+childProcess.execFileSync(process.execPath, [path.join(root, "tools/test-note-formatting.js")], {
+  stdio: "inherit"
+});
+
 for (const file of requiredFiles.concat(["README.md"]).filter((name) => /\.(js|xhtml|md)$/.test(name))) {
   const text = fs.readFileSync(path.join(root, file), "utf8");
   assert(!/(\u951b|\u9239|\u940e|\u7d31\u3120|\u599d\u2033|\u93bd\u6a0a|\u7487\u5cf0|\u934f\u70b5)/.test(text), `${file} appears to contain mojibake`);
@@ -65,6 +71,16 @@ for (const file of ["content/search.xhtml", "content/preferences-pane.xhtml"]) {
     stdio: "inherit"
   });
 }
+
+const preferencesPaneJS = fs.readFileSync(path.join(root, "content/preferences-pane.js"), "utf8");
+assert(
+  /initializedRoot/.test(preferencesPaneJS) && /MutationObserver/.test(preferencesPaneJS),
+  "preferences pane must reinitialize when Zotero recreates the settings DOM"
+);
+assert(
+  !/let\s+initialized\s*=\s*false/.test(preferencesPaneJS),
+  "preferences pane must not use a single global initialized boolean"
+);
 
 const xpiPath = path.join(root, "dist", `zotero-ai-assistant-${manifest.version}.xpi`);
 if (fs.existsSync(xpiPath)) {

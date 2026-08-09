@@ -1,6 +1,6 @@
 # Zotero AI Assistant
 
-Zotero 7-9 compatible extension for three OpenRouter-powered workflows:
+Zotero 7-9 compatible extension for three OpenAI-compatible API workflows. OpenRouter remains the default provider:
 
 - Read the current paper and save a Chinese structured reading note.
 - Search the local Zotero library for citation candidates using text extraction, local chunking, embeddings, and reranking.
@@ -19,7 +19,7 @@ The previous main-list top toolbar and reader-note-toolbar experiments have been
 ## Main Files
 
 - `bootstrap.js`: Zotero plugin lifecycle. It registers chrome content, registers the preferences pane, loads `content/zotero-ai.js`, exposes `Zotero.ZoteroAI`, and injects UI into open Zotero windows.
-- `content/zotero-ai.js`: core plugin logic. It owns UI injection, OpenRouter calls, PDF text extraction, chunking, embeddings, local index storage, summary generation, citation search, note Q&A, and progress feedback.
+- `content/zotero-ai.js`: core plugin logic. It owns UI injection, OpenAI-compatible API calls, PDF text extraction, chunking, embeddings, local index storage, summary generation, citation search, note Q&A, and progress feedback.
 - `content/toolbar.css`: styles for the three right-side icon buttons.
 - `content/search.xhtml`: citation-search dialog shell.
 - `content/search.js`: citation-search dialog behavior, including query submission, rebuild-index button handling, result rendering, and progress status forwarding.
@@ -50,10 +50,10 @@ If prompt editing becomes frequent, the next sensible cleanup is moving these st
 1. Resolve the target paper from the active reader PDF when possible; otherwise use the selected regular Zotero item.
 2. Find the best PDF attachment.
 3. Prefer Zotero indexed full text and page text.
-4. If local text is unavailable and PDF mode allows it, use OpenRouter PDF parser/OCR fallback.
+4. If local text is unavailable and PDF mode allows it, use the configured remote PDF parser/OCR fallback.
 5. If page boundaries are available, remove the configured number of trailing pages before summarization.
 6. Split the selected text into summary chunks. `maxSummaryChunks = 0` means no chunk-count cap.
-7. Call the configured chat model through OpenRouter.
+7. Call the configured text model through its selected API endpoint and format.
 8. Convert Markdown to Zotero note HTML and save a child note under the paper.
 
 ### Citation Search
@@ -93,7 +93,15 @@ This avoids the blank custom XUL/HTML progress-window issue seen during earlier 
 
 Preferences are stored under `extensions.zotero-ai.*`:
 
-- `openrouterApiKey`: OpenRouter API key.
+- `chatAPIFormat`: text-model request format, `openrouter` or `openai`.
+- `chatBaseURL`: text-model API base URL, default `https://openrouter.ai/api/v1`.
+- `chatApiKey`: text-model API key. If empty, the legacy `openrouterApiKey` is used as a fallback.
+- `multimodalAPIFormat`: multimodal request format, `openrouter` or `openai`.
+- `multimodalBaseURL`: multimodal-model API base URL.
+- `multimodalApiKey`: multimodal-model API key.
+- `embeddingAPIFormat`: embedding request format, `openrouter` or `openai`.
+- `embeddingBaseURL`: embedding-model API base URL.
+- `embeddingApiKey`: embedding-model API key.
 - `chatModel`: selected chat model preset or `custom`.
 - `customChatModel`: model id used when `chatModel = custom`.
 - `embeddingModel`: selected embedding model preset or `custom`.
@@ -114,7 +122,7 @@ npm run diagnose
 The build script creates:
 
 ```text
-dist/zotero-ai-assistant-0.1.19.xpi
+dist/zotero-ai-assistant-0.1.34.xpi
 ```
 
 ## Install For Testing
@@ -122,11 +130,11 @@ dist/zotero-ai-assistant-0.1.19.xpi
 1. Run `npm run build`.
 2. Open Zotero.
 3. Go to `Tools -> Plugins`.
-4. Drag `dist/zotero-ai-assistant-0.1.19.xpi` into the plugin window.
+4. Drag `dist/zotero-ai-assistant-0.1.34.xpi` into the plugin window.
 5. Restart Zotero if prompted.
 
 ## Implementation Notes
 
-OpenRouter embeddings work on text input, not a complete PDF file. The plugin therefore follows a RAG-style pipeline: obtain PDF text, normalize and chunk locally, embed chunks through OpenRouter, store vectors locally, semantically recall chunks, and use the chat model only for generation/reranking.
+Embedding APIs work on text input, not a complete PDF file. The plugin therefore follows a RAG-style pipeline: obtain PDF text, normalize and chunk locally, embed chunks through the configured embedding endpoint, store vectors locally, semantically recall chunks, and use the text model only for generation/reranking.
 
 The extension currently uses Zotero internal UI selectors for the right-side `sidenav`, because Zotero's reader and item panes vary across versions. The selectors are kept narrow enough to avoid the old top-toolbar injection path, and the mutation observer only re-injects the right-side button group.

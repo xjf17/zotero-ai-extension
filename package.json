@@ -1,9 +1,10 @@
 {
   "name": "zotero-ai-assistant",
-  "version": "0.1.19",
+  "version": "0.1.35",
   "private": true,
-  "description": "Zotero AI assistant plugin using OpenRouter.",
+  "description": "Zotero AI assistant plugin using OpenAI-compatible APIs.",
   "scripts": {
+    "test": "node tools/test-note-formatting.js",
     "validate": "node tools/validate.js",
     "diagnose": "node tools/diagnose-xpi.js",
     "build": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-xpi.ps1"

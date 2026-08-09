@@ -12,6 +12,11 @@ function install() {
 async function startup({ id, version, rootURI }) {
   log("Starting");
 
+  // Reader event hooks must be registered after Zotero's UI services exist.
+  await Zotero.initializationPromise;
+  await Zotero.unlockPromise;
+  await Zotero.uiReadyPromise;
+
   const aomStartup = Cc["@mozilla.org/addons/addon-manager-startup;1"]
     .getService(Ci.amIAddonManagerStartup);
   const manifestURI = Services.io.newURI(rootURI + "manifest.json");

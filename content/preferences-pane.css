@@ -19,6 +19,13 @@
   font-size: 1.1em;
 }
 
+#zotero-ai-preferences .zotero-ai-pref-help {
+  grid-column: 1 / -1;
+  margin: 0 0 4px;
+  color: #5b6470;
+  line-height: 1.4;
+}
+
 #zotero-ai-preferences label {
   justify-self: end;
 }
