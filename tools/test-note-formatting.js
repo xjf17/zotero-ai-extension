@@ -32,6 +32,30 @@ assert.strictEqual(
   String.raw`<p>代码 <code>$x$</code> 不应转换。</p>`
 );
 
+const table = [
+  "| 组件 | 默认配置 |",
+  "|---|---|",
+  "| 序列化模式 | Z-order、Trans Z-order |",
+  "| Patch 交互 | Shift Order + Shuffle Order |"
+].join("\n");
+const tableHTML = markdownToNoteHTML(table);
+assert.ok(tableHTML.includes("<table"));
+assert.ok(tableHTML.includes("<th"));
+assert.ok(tableHTML.includes("<td"));
+assert.ok(tableHTML.includes("序列化模式"));
+assert.ok(!tableHTML.includes("<p>| 组件"));
+
+const nestedList = [
+  "- **效率瓶颈**:",
+  "  - 基于 K 近邻的邻域搜索约占前向传播时间的28%。",
+  "  - 点云相对位置编码需要计算成对欧氏距离。",
+  "- **研究目标**: 提升整体性能。"
+].join("\n");
+const nestedListHTML = markdownToNoteHTML(nestedList);
+assert.ok(nestedListHTML.includes("<strong>效率瓶颈</strong>:<ul>"));
+assert.ok(nestedListHTML.includes("基于 K 近邻"));
+assert.ok(nestedListHTML.indexOf("<strong>研究目标</strong>") > nestedListHTML.indexOf("</ul>"));
+
 assert.strictEqual(
   normalizeMathDelimiters(String.raw`行内 \(x_i\)，块级 \[y_i^2\]。`),
   "行内 $x_i$，块级 $$\ny_i^2\n$$。"

@@ -17,7 +17,10 @@
     summaryExcludeTrailingPages: 2,
     referenceTopK: 5,
     embedBatchSize: 24,
-    requestTimeoutMs: 60000
+    embedConcurrentRequests: 5,
+    requestTimeoutMs: 60000,
+    requestMaxAttempts: 3,
+    requestRetryBaseDelayMs: 900
   };
   const DEFAULT_API_BASE_URL = "https://openrouter.ai/api/v1";
 

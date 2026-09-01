@@ -132,23 +132,180 @@
       .replace(/\\\(([\s\S]*?)\\\)/g, (_, formula) => `$${formula.trim()}$`);
   }
 
-  function flushList(out, list) {
-    if (!list) {
+  function normalizeMarkdown(text) {
+    return String(text || "")
+      .replace(/\r\n?/g, "\n")
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+$/gm, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  function readListMarker(rawLine) {
+    const match = String(rawLine || "").match(/^(\s*)([-*]|\d+[.)])\s+(.+)$/);
+    if (!match) {
       return null;
     }
-    out.push(`<${list.type}>`);
-    for (const item of list.items) {
-      out.push(`<li>${inlineMarkdownToHTML(item)}</li>`);
+    return {
+      indent: match[1].replace(/\t/g, "    ").length,
+      type: /^\d/.test(match[2]) ? "ol" : "ul",
+      text: match[3].trim()
+    };
+  }
+
+  function renderList(list) {
+    const items = list.items.map((item) => {
+      const nested = item.children.map(renderList).join("");
+      return `<li>${inlineMarkdownToHTML(item.text)}${nested}</li>`;
+    }).join("");
+    return `<${list.type}>${items}</${list.type}>`;
+  }
+
+  function attachList(listStack, list) {
+    if (!listStack.length) {
+      listStack.push(list);
+      return;
     }
-    out.push(`</${list.type}>`);
-    return null;
+    const parent = listStack[listStack.length - 1];
+    const parentItem = parent.items[parent.items.length - 1];
+    if (!parentItem) {
+      listStack.length = 0;
+      listStack.push(list);
+      return;
+    }
+    parentItem.children.push(list);
+    listStack.push(list);
+  }
+
+  function appendListItem(listStack, marker) {
+    while (listStack.length && marker.indent < listStack[listStack.length - 1].indent) {
+      listStack.pop();
+    }
+
+    let current = listStack[listStack.length - 1] || null;
+    if (!current || marker.indent > current.indent) {
+      current = {
+        type: marker.type,
+        indent: marker.indent,
+        items: []
+      };
+      attachList(listStack, current);
+    } else if (marker.type !== current.type) {
+      listStack.pop();
+      current = {
+        type: marker.type,
+        indent: marker.indent,
+        items: []
+      };
+      attachList(listStack, current);
+    }
+
+    current.items.push({
+      text: marker.text,
+      children: []
+    });
+  }
+
+  function flushList(out, listStack) {
+    if (!listStack.length) {
+      return [];
+    }
+    out.push(renderList(listStack[0]));
+    return [];
+  }
+
+  function splitMarkdownTableRow(row) {
+    const source = String(row || "").trim().replace(/^\|/, "").replace(/\|$/, "");
+    const cells = [];
+    let cell = "";
+    let escaped = false;
+
+    for (const char of source) {
+      if (escaped) {
+        cell += char;
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        cell += char;
+        escaped = true;
+        continue;
+      }
+      if (char === "|") {
+        cells.push(cell.trim());
+        cell = "";
+        continue;
+      }
+      cell += char;
+    }
+    cells.push(cell.trim());
+    return cells;
+  }
+
+  function isMarkdownTableSeparator(line) {
+    const cells = splitMarkdownTableRow(line);
+    return cells.length > 1 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")));
+  }
+
+  function isMarkdownTableRow(line) {
+    return String(line || "").includes("|") && splitMarkdownTableRow(line).length > 1;
+  }
+
+  function normalizeTableCells(cells, width) {
+    const normalized = cells.slice(0, width);
+    while (normalized.length < width) {
+      normalized.push("");
+    }
+    return normalized;
+  }
+
+  function renderTableCell(tag, content) {
+    const style = "border:1px solid #d0d7de;padding:4px 6px;vertical-align:top;";
+    return `<${tag} style="${style}">${inlineMarkdownToHTML(content)}</${tag}>`;
+  }
+
+  function renderTable(header, rows) {
+    const tableStyle = "border-collapse:collapse;width:100%;";
+    const head = `<thead><tr>${header.map((cell) => renderTableCell("th", cell)).join("")}</tr></thead>`;
+    const body = rows.length
+      ? `<tbody>${rows.map((row) => `<tr>${row.map((cell) => renderTableCell("td", cell)).join("")}</tr>`).join("")}</tbody>`
+      : "";
+    return `<table style="${tableStyle}">${head}${body}</table>`;
+  }
+
+  function readMarkdownTable(lines, startIndex) {
+    if (startIndex + 1 >= lines.length || !isMarkdownTableSeparator(lines[startIndex + 1])) {
+      return null;
+    }
+
+    const header = splitMarkdownTableRow(lines[startIndex]);
+    if (header.length < 2 || !isMarkdownTableRow(lines[startIndex])) {
+      return null;
+    }
+
+    const width = header.length;
+    const rows = [];
+    let endIndex = startIndex + 1;
+    for (let i = startIndex + 2; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || !isMarkdownTableRow(line)) {
+        break;
+      }
+      rows.push(normalizeTableCells(splitMarkdownTableRow(line), width));
+      endIndex = i;
+    }
+
+    return {
+      html: renderTable(normalizeTableCells(header, width), rows),
+      endIndex
+    };
   }
 
   function markdownToNoteHTML(markdown) {
-    const lines = normalizeText(markdown).split("\n");
+    const lines = normalizeMarkdown(markdown).split("\n");
     const out = [];
     let paragraph = [];
-    let list = null;
+    let listStack = [];
 
     function flushParagraph() {
       if (!paragraph.length) {
@@ -164,7 +321,7 @@
       const displayMath = readDisplayMath(lines, i);
       if (displayMath) {
         flushParagraph();
-        list = flushList(out, list);
+        listStack = flushList(out, listStack);
         if (displayMath.content) {
           out.push(mathToNoteHTML(displayMath.content, true));
         }
@@ -173,12 +330,12 @@
       }
       if (!line) {
         flushParagraph();
-        list = flushList(out, list);
+        listStack = flushList(out, listStack);
         continue;
       }
       if (/^---+$/.test(line)) {
         flushParagraph();
-        list = flushList(out, list);
+        listStack = flushList(out, listStack);
         out.push("<hr/>");
         continue;
       }
@@ -186,40 +343,39 @@
       const heading = line.match(/^(#{1,6})\s+(.+)$/);
       if (heading) {
         flushParagraph();
-        list = flushList(out, list);
+        listStack = flushList(out, listStack);
         const level = Math.min(6, heading[1].length);
         out.push(`<h${level}>${inlineMarkdownToHTML(heading[2])}</h${level}>`);
         continue;
       }
 
-      const unordered = line.match(/^[-*]\s+(.+)$/);
-      if (unordered) {
+      const table = readMarkdownTable(lines, i);
+      if (table) {
         flushParagraph();
-        if (!list || list.type !== "ul") {
-          list = flushList(out, list);
-          list = { type: "ul", items: [] };
-        }
-        list.items.push(unordered[1]);
+        listStack = flushList(out, listStack);
+        out.push(table.html);
+        i = table.endIndex;
         continue;
       }
 
-      const ordered = line.match(/^\d+[.)]\s+(.+)$/);
-      if (ordered) {
+      const listMarker = readListMarker(rawLine);
+      if (listMarker) {
         flushParagraph();
-        if (!list || list.type !== "ol") {
-          list = flushList(out, list);
-          list = { type: "ol", items: [] };
+        if (listStack.length === 1
+          && listMarker.indent === listStack[0].indent
+          && listMarker.type !== listStack[0].type) {
+          listStack = flushList(out, listStack);
         }
-        list.items.push(ordered[1]);
+        appendListItem(listStack, listMarker);
         continue;
       }
 
-      list = flushList(out, list);
+      listStack = flushList(out, listStack);
       paragraph.push(line);
     }
 
     flushParagraph();
-    flushList(out, list);
+    flushList(out, listStack);
     return out.join("\n");
   }
 

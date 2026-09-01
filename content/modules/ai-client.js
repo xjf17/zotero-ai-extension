@@ -91,8 +91,40 @@
       return config;
     }
 
-    async request(kind, path, body) {
-      const config = this.ensureConfigured(kind);
+    sleep(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    isRetryableRequestError(err) {
+      const message = String(err?.message || err || "").toLowerCase();
+      return message.includes("content-length")
+        || message.includes("network")
+        || message.includes("fetch")
+        || message.includes("timeout")
+        || message.includes("timed out")
+        || message.includes("aborted")
+        || message.includes("connection")
+        || message.includes("reset")
+        || message.includes("temporar")
+        || message.includes("incomplete")
+        || message.includes("body");
+    }
+
+    isRetryableStatus(status) {
+      return status === 408
+        || status === 409
+        || status === 425
+        || status === 429
+        || (status >= 500 && status < 600);
+    }
+
+    retryDelay(attempt) {
+      const base = DEFAULTS.requestRetryBaseDelayMs || 900;
+      const jitter = Math.floor(Math.random() * 250);
+      return base * Math.pow(2, attempt - 1) + jitter;
+    }
+
+    async requestOnce(config, path, body) {
       const timeoutMs = DEFAULTS.requestTimeoutMs;
       const headers = {
         "Content-Type": "application/json"
@@ -116,7 +148,14 @@
       });
       const response = await Promise.race([fetchPromise, timeoutPromise]);
 
-      const text = await response.text();
+      let text;
+      try {
+        text = await response.text();
+      }
+      catch (err) {
+        err.retryable = true;
+        throw err;
+      }
       let payload;
       try {
         payload = text ? JSON.parse(text) : {};
@@ -127,9 +166,35 @@
 
       if (!response.ok) {
         const message = payload?.error?.message || response.statusText || "API request failed";
-        throw new Error(`${config.label} API ${response.status}: ${message}`);
+        const err = new Error(`${config.label} API ${response.status}: ${message}`);
+        err.status = response.status;
+        throw err;
       }
       return payload;
+    }
+
+    async request(kind, path, body) {
+      const config = this.ensureConfigured(kind);
+      const maxAttempts = Math.max(1, DEFAULTS.requestMaxAttempts || 1);
+      let lastError = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          return await this.requestOnce(config, path, body);
+        }
+        catch (err) {
+          lastError = err;
+          const retryable = err?.retryable
+            || this.isRetryableStatus(err?.status)
+            || this.isRetryableRequestError(err);
+          if (!retryable || attempt >= maxAttempts) {
+            throw err;
+          }
+          const delay = this.retryDelay(attempt);
+          Zotero.debug(`Zotero AI Assistant: ${config.label} request failed, retrying ${attempt + 1}/${maxAttempts} after ${delay}ms: ${err}`);
+          await this.sleep(delay);
+        }
+      }
+      throw lastError;
     }
 
     async chat(messages, options = {}) {

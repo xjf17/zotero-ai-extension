@@ -134,11 +134,7 @@
         throw new Error(`“${getItemTitle(item)}” 没有足够的文本可索引。`);
       }
 
-      const embeddings = [];
-      for (let start = 0; start < chunks.length; start += DEFAULTS.embedBatchSize) {
-        const batch = chunks.slice(start, start + DEFAULTS.embedBatchSize);
-        embeddings.push(...await this.client.embed(batch));
-      }
+      const embeddings = await this.embedChunks(chunks);
 
       index.items[item.id] = {
         itemID: item.id,
@@ -159,6 +155,32 @@
         }))
       };
       return index.items[item.id];
+    }
+
+    async embedChunks(chunks) {
+      const batchSize = Math.max(1, DEFAULTS.embedBatchSize || 24);
+      const concurrency = Math.max(1, DEFAULTS.embedConcurrentRequests || 1);
+      const batches = [];
+      for (let start = 0; start < chunks.length; start += batchSize) {
+        batches.push({
+          index: batches.length,
+          texts: chunks.slice(start, start + batchSize)
+        });
+      }
+
+      const results = new Array(batches.length);
+      let next = 0;
+      const workers = Array.from(
+        { length: Math.min(concurrency, batches.length) },
+        async () => {
+          while (next < batches.length) {
+            const batch = batches[next++];
+            results[batch.index] = await this.client.embed(batch.texts);
+          }
+        }
+      );
+      await Promise.all(workers);
+      return results.flat();
     }
 
     async ensureItemsIndexed(items, progressCallback) {
