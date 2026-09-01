@@ -2,6 +2,8 @@
 
 A Zotero plugin that uses AI to help you read papers, find citation candidates, and answer questions written in your notes. It connects to any OpenAI-compatible API; the default and recommended provider is [OpenRouter](https://openrouter.ai), which gives access to many AI models through one API key.
 
+中文版本readme请见[此处](https://github.com/xjf17/zotero-ai-extension/edit/main/README.zh-CN.md)
+
 Compatible with Zotero 7, 8, and 9.
 
 ---
