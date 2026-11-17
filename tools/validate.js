@@ -18,6 +18,7 @@ const requiredFiles = [
   "content/modules/prompts.js",
   "content/modules/ai-client.js",
   "content/search.xhtml",
+  "content/search.html",
   "content/search.js",
   "content/search.css",
   "content/preferences-pane.xhtml",
@@ -27,7 +28,10 @@ const requiredFiles = [
   "content/icons/search-quote.svg",
   "content/icons/message-circle-question.svg",
   "content/icons/sparkle.svg",
-  "tools/test-note-formatting.js"
+  "tools/test-note-formatting.js",
+  "tools/test-index-store.js",
+  "tools/test-embedding-response.js",
+  "tools/test-collection-index.js"
 ];
 
 function assert(condition, message) {
@@ -64,8 +68,17 @@ for (const file of requiredFiles.filter((name) => name.endsWith(".js"))) {
 childProcess.execFileSync(process.execPath, [path.join(root, "tools/test-note-formatting.js")], {
   stdio: "inherit"
 });
+childProcess.execFileSync(process.execPath, [path.join(root, "tools/test-index-store.js")], {
+  stdio: "inherit"
+});
+childProcess.execFileSync(process.execPath, [path.join(root, "tools/test-embedding-response.js")], {
+  stdio: "inherit"
+});
+childProcess.execFileSync(process.execPath, [path.join(root, "tools/test-collection-index.js")], {
+  stdio: "inherit"
+});
 
-for (const file of requiredFiles.concat(["README.md"]).filter((name) => /\.(js|xhtml|md)$/.test(name))) {
+for (const file of requiredFiles.concat(["README.md"]).filter((name) => /\.(js|html|xhtml|md)$/.test(name))) {
   const text = fs.readFileSync(path.join(root, file), "utf8");
   assert(!/(\u951b|\u9239|\u940e|\u7d31\u3120|\u599d\u2033|\u93bd\u6a0a|\u7487\u5cf0|\u934f\u70b5)/.test(text), `${file} appears to contain mojibake`);
 }

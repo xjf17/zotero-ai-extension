@@ -168,7 +168,7 @@ Open Zotero Settings and click the **Zotero AI** tab to access all options.
 |---|---|---|
 | Text Model | DeepSeek V4 Flash | Paper reading, citation reranking, note Q&A |
 | Multimodal Model | Gemini 3.6 Flash | Figure/annotation explanation |
-| Embedding Model | Nemotron Embed 1B (free) | Building and searching the citation index |
+| Embedding Model | Qwen3 Embedding 8B | Building and searching the citation index |
 
 Select a different model from the dropdown, or choose **Custom model id** and type any model ID supported by your API provider.
 

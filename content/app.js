@@ -50,6 +50,7 @@
       this.version = version;
       this.rootURI = rootURI;
       this.client = new OpenAICompatibleClient();
+      this.migrateEmbeddingModel();
       this.textSource = new TextSource(this.client);
       this.indexStore = new IndexStore(this.client, this.textSource);
       this.windows = new Set();
@@ -60,6 +61,19 @@
       this.readerAnnotationHeaderHandler = null;
       this.readerAnnotationHeaderEventSeen = false;
       this.registerAnnotationHeaderHook();
+    }
+
+    migrateEmbeddingModel() {
+      const marker = "qwenEmbeddingDefaultApplied";
+      if (pref(marker, false)) {
+        return;
+      }
+      const config = this.client.getModelSettings("embedding");
+      if (pref("embeddingModel", "") === "nvidia/nemotron-3-embed-1b:free"
+        && ns.isOpenRouterURL(config.baseURL)) {
+        Zotero.Prefs.set(ns.PREF_BRANCH + "embeddingModel", "qwen/qwen3-embedding-8b", true);
+      }
+      Zotero.Prefs.set(ns.PREF_BRANCH + marker, true, true);
     }
 
     async runOnce(key, task) {
@@ -462,8 +476,7 @@
         return null;
       }
       this.runningActions.add("open-search-panel");
-      const progress = this.createProgressHandle(win, "正在打开查找引用面板...");
-      const features = "chrome,centerscreen,resizable,width=920,height=720";
+      const features = "chrome,dialog=no,centerscreen,resizable,width=920,height=720";
       const url = "chrome://zoteroai/content/search.html";
       let dialog = null;
       try {
@@ -471,12 +484,18 @@
           app: this,
           opener: win
         });
-        dialog?.addEventListener?.("load", () => progress.close(), { once: true });
-        win.setTimeout(() => progress.close(), 1500);
-      }
-      catch (err) {
-        progress.close();
-        throw err;
+        const focusPanel = () => {
+          if (!dialog || dialog.closed) {
+            return;
+          }
+          dialog.focus();
+          dialog.document.getElementById("zotero-ai-query")?.focus();
+        };
+        dialog?.addEventListener("load", () => {
+          // Let the opening command and menu dismissal finish before focusing.
+          dialog.setTimeout(focusPanel, 0);
+        }, { once: true });
+        dialog?.focus();
       }
       finally {
         win.setTimeout(() => this.runningActions.delete("open-search-panel"), 500);
@@ -503,6 +522,10 @@
 
     async getCurrentLibraryID(win) {
       try {
+        const selectedID = win.ZoteroPane.getSelectedLibraryID?.();
+        if (selectedID) {
+          return selectedID;
+        }
         const collectionTreeRow = win.ZoteroPane.collectionsView?.selection?.focused;
         const row = collectionTreeRow != null ? win.ZoteroPane.collectionsView.getRow(collectionTreeRow) : null;
         if (row?.ref?.libraryID) {
@@ -515,9 +538,41 @@
       return Zotero.Libraries.userLibraryID;
     }
 
+    async getReferenceScope(win) {
+      const pane = win.ZoteroPane;
+      const libraryID = await this.getCurrentLibraryID(win);
+      const selected = pane.getSelectedCollection?.();
+      const groups = [];
+      const collections = selected
+        ? [selected]
+        : [...Zotero.Collections.getByLibrary(libraryID)];
+      const visible = selected ? [] : await this.getVisibleRegularItems(win);
+      const visibleIDs = new Set(visible.map((item) => item.id));
+      for (const collection of collections) {
+        await collection.loadAllData();
+        if (!selected) {
+          collections.push(...collection.getChildCollections());
+        }
+        const items = collection.getChildItems().filter((item) => isRegularItem(item)
+          && !item.deleted && (selected || visibleIDs.has(item.id)));
+        groups.push({ collectionID: collection.id, name: collection.name, items });
+      }
+      if (!selected) {
+        groups.push({
+          collectionID: null,
+          name: "未分类文献",
+          items: visible.filter((item) => !item.deleted && !item.getCollections().length)
+        });
+      }
+      return { libraryID, name: selected?.name || "当前文献视图", groups };
+    }
+
     async getVisibleRegularItems(win) {
       try {
-        const items = win.ZoteroPane.getSortedItems?.() || win.ZoteroPane.itemsView?.getSortedItems?.() || [];
+        const items = win.ZoteroPane.getSortedItems?.() || win.ZoteroPane.itemsView?.getSortedItems?.();
+        if (!items) {
+          throw new Error("无法读取当前文献视图，请返回文献库后重试。");
+        }
         const resolved = [];
         for (const candidate of items) {
           const item = typeof candidate === "number" ? await Zotero.Items.getAsync(candidate) : candidate;
@@ -525,42 +580,58 @@
             resolved.push(item);
           }
         }
-        if (resolved.length) {
-          return resolved;
-        }
+        return resolved;
       }
       catch (err) {
-        Zotero.debug(`Zotero AI Assistant: failed to read visible items: ${err}`);
+        throw new Error(`读取当前文献视图失败: ${err.message || err}`);
       }
-
-      const libraryID = await this.getCurrentLibraryID(win);
-      const itemIDs = await Zotero.Items.getAll(libraryID, true);
-      const items = [];
-      for (const id of itemIDs) {
-        const item = await Zotero.Items.getAsync(id);
-        if (isRegularItem(item)) {
-          items.push(item);
-        }
-      }
-      return items;
     }
 
-    async rebuildIndexForVisibleItems(win, progressCallback, chunkOptions = {}) {
+    async rebuildIndexForVisibleItems(win, progressCallback, chunkOptions = {}, referenceScope = null) {
       return this.runOnce("rebuild-index", async () => {
       // 提前校验：确保已填写 API Key
       this.client.ensureConfigured("embedding");
 
-      const items = await this.getVisibleRegularItems(win);
-      if (!items.length) {
+      const scope = referenceScope || await this.getReferenceScope(win);
+      const total = new Set(scope.groups.flatMap((group) => group.items.map((item) => item.id))).size;
+      if (!total) {
         throw new Error("当前视图没有可索引的文献。");
       }
-      const result = await this.indexStore.rebuildItems(items, progressCallback, chunkOptions);
+      const updated = new Set();
+      const reused = new Set();
+      const failed = new Map();
+      for (const group of scope.groups) {
+        if (!group.items.length) {
+          continue;
+        }
+        progressCallback?.(`分类「${group.name}」: ${group.items.length} 篇文献`);
+        const result = await this.indexStore.rebuildItems(group.items, (message) => {
+          progressCallback?.(`「${group.name}」${message}`);
+        }, chunkOptions, group.collectionID);
+        for (const id of result.updatedIDs) updated.add(id);
+        for (const id of result.reusedIDs) reused.add(id);
+        for (const failure of result.itemFailures) {
+          const messages = failed.get(failure.itemID) || [];
+          messages.push(`「${group.name}」${failure.message}`);
+          failed.set(failure.itemID, messages);
+        }
+      }
       return {
-        total: items.length,
-        indexed: result.indexed,
-        failures: result.failures
+        total,
+        indexed: [...updated].filter((id) => !failed.has(id)).length,
+        skipped: [...reused].filter((id) => !updated.has(id) && !failed.has(id)).length,
+        failures: [...failed.values()].map((messages) => messages.join("\n"))
       };
       });
+    }
+
+    formatIndexResult(result) {
+      const failures = result.failures || [];
+      const summary = `索引处理完成: 新建/更新 ${result.indexed} 篇，复用已有索引 ${result.skipped} 篇，失败 ${failures.length} 篇`;
+      return {
+        summary,
+        details: failures.map((message, index) => `${index + 1}. ${message}`).join("\n\n")
+      };
     }
 
     async rebuildIndexFromAnyWindow(progressCallback) {
@@ -582,27 +653,33 @@
         throw new Error("请输入一句想法或论点。");
       }
 
-      const libraryID = await this.getCurrentLibraryID(win);
-      progressCallback?.("正在进行语义召回...");
+      const scope = await this.getReferenceScope(win);
+      const { libraryID } = scope;
+      if (!scope.groups.some((group) => group.items.length)) {
+        throw new Error(`「${scope.name}」中没有可检索的文献。`);
+      }
+      progressCallback?.(`正在检索「${scope.name}」的分类索引...`);
       let candidates = await this.indexStore.search(
         libraryID,
         normalizedQuery,
-        Number(pref("referenceTopK", DEFAULTS.referenceTopK))
+        Number(pref("referenceTopK", DEFAULTS.referenceTopK)),
+        scope.groups
       );
 
-      if (!candidates.length) {
+      if (!candidates.length || this.indexStore._missingScopes.length) {
         const reason = this.indexStore._modelChangedOnLoad
           ? "检测到 Embedding 模型已变更，原有索引已自动清除。\n是否立即用新模型重建当前视图的索引？"
-          : "当前文献库还没有可用向量索引。是否现在为当前视图中的文献建立索引？";
+          : `「${scope.name}」的分类索引尚未完整建立。是否现在为当前范围建立索引？\n旧版整库 JSON 不会自动加载，新分类索引首次需要重建。`;
         const shouldBuild = confirmUser(win, "Zotero AI", reason);
         if (!shouldBuild) {
-          return [];
+          return this.rerankReferences(normalizedQuery, candidates.slice(0, 12));
         }
-        await this.rebuildIndexForVisibleItems(win, progressCallback);
+        await this.rebuildIndexForVisibleItems(win, progressCallback, {}, scope);
         candidates = await this.indexStore.search(
           libraryID,
           normalizedQuery,
-          Number(pref("referenceTopK", DEFAULTS.referenceTopK))
+          Number(pref("referenceTopK", DEFAULTS.referenceTopK)),
+          scope.groups
         );
       }
 

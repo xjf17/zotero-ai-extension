@@ -100,11 +100,18 @@
 
     <html:label for="zotero-ai-top-k">引用结果数量</html:label>
     <html:input id="zotero-ai-top-k" type="number" min="1" max="10"/>
+
+    <html:label for="zotero-ai-embed-concurrency">Embedding 并发请求数</html:label>
+    <html:input id="zotero-ai-embed-concurrency" type="number" min="1" step="1"/>
+
+    <html:label for="zotero-ai-embed-batch-size">Embedding 每批片段数</html:label>
+    <html:input id="zotero-ai-embed-batch-size" type="number" min="1" step="1"/>
   </html:fieldset>
 
   <html:div class="zotero-ai-pref-actions">
     <html:button id="zotero-ai-save-prefs" type="button">保存设置</html:button>
-    <html:button id="zotero-ai-rebuild-index" type="button">重建当前视图索引</html:button>
+    <html:button id="zotero-ai-rebuild-index" type="button">重建当前分类范围索引</html:button>
     <html:span id="zotero-ai-pref-status"></html:span>
   </html:div>
+  <html:textarea id="zotero-ai-pref-index-errors" rows="8" readonly="readonly" hidden="hidden" aria-label="索引失败详情"/>
 </vbox>

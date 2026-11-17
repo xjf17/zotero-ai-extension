@@ -10,7 +10,7 @@
     <div id="zotero-ai-search-header">
       <span id="zotero-ai-title">AI 查找引用</span>
       <span style="flex:1"></span>
-      <button id="zotero-ai-rebuild">重建当前视图索引</button>
+      <button id="zotero-ai-rebuild">重建当前分类范围索引</button>
     </div>
     <div id="zotero-ai-query-box">
       <label for="zotero-ai-query">输入一句想法或论点</label>
@@ -32,6 +32,7 @@
       </label>
     </div>
     <div id="zotero-ai-results"></div>
+    <textarea id="zotero-ai-index-errors" rows="8" readonly hidden aria-label="索引失败详情"></textarea>
   </div>
   <script src="search.js" type="application/javascript"></script>
 </body>

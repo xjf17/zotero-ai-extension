@@ -1,10 +1,10 @@
 {
   "name": "zotero-ai-assistant",
-  "version": "0.1.36",
+  "version": "0.2.0",
   "private": true,
   "description": "Zotero AI assistant plugin using OpenAI-compatible APIs.",
   "scripts": {
-    "test": "node tools/test-note-formatting.js",
+    "test": "node tools/test-note-formatting.js && node tools/test-index-store.js && node tools/test-embedding-response.js && node tools/test-collection-index.js",
     "validate": "node tools/validate.js",
     "diagnose": "node tools/diagnose-xpi.js",
     "build": "powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-xpi.ps1"

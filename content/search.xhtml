@@ -5,6 +5,7 @@
   id="zotero-ai-search-window"
   title="AI 查找引用"
   xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  xmlns:html="http://www.w3.org/1999/xhtml"
   width="920"
   height="720"
   persist="screenX screenY width height">
@@ -13,7 +14,7 @@
     <hbox id="zotero-ai-search-header" align="center">
       <label id="zotero-ai-title" value="AI 查找引用"/>
       <spacer flex="1"/>
-      <button id="zotero-ai-rebuild" label="重建当前视图索引"/>
+      <button id="zotero-ai-rebuild" label="重建当前分类范围索引"/>
     </hbox>
     <vbox id="zotero-ai-query-box">
       <label value="输入一句想法或论点"/>
@@ -26,5 +27,6 @@
       </hbox>
     </vbox>
     <richlistbox id="zotero-ai-results" flex="1"/>
+    <html:textarea id="zotero-ai-index-errors" rows="8" readonly="readonly" hidden="hidden" aria-label="索引失败详情"/>
   </vbox>
 </window>

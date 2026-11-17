@@ -95,6 +95,15 @@ html, body {
   color: #606975;
 }
 
+#zotero-ai-index-errors {
+  box-sizing: border-box;
+  width: 100%;
+  flex-shrink: 0;
+  margin-top: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 #zotero-ai-results {
   flex: 1;
   overflow-y: auto;

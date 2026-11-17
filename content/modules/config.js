@@ -16,8 +16,8 @@
     maxSummaryChunks: 0,
     summaryExcludeTrailingPages: 2,
     referenceTopK: 5,
-    embedBatchSize: 24,
-    embedConcurrentRequests: 5,
+    embedBatchSize: 64,
+    embedConcurrentRequests: 10,
     requestTimeoutMs: 60000,
     requestMaxAttempts: 3,
     requestRetryBaseDelayMs: 900

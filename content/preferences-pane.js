@@ -36,6 +36,17 @@
     }
   }
 
+  function setIndexErrors(message) {
+    const details = $("zotero-ai-pref-index-errors");
+    if (details) {
+      details.value = message;
+      details.hidden = !message;
+    }
+    else if (message) {
+      setStatus(`${$("zotero-ai-pref-status")?.textContent || ""}\n${message}`.trim());
+    }
+  }
+
   function loadPrefs() {
     setValue("zotero-ai-chat-api-format", pref("chatAPIFormat", "openrouter"));
     setValue("zotero-ai-chat-base-url", pref("chatBaseURL", "https://openrouter.ai/api/v1"));
@@ -45,7 +56,7 @@
     setValue("zotero-ai-multimodal-api-format", pref("multimodalAPIFormat", "openrouter"));
     setValue("zotero-ai-multimodal-base-url", pref("multimodalBaseURL", "https://openrouter.ai/api/v1"));
     setValue("zotero-ai-multimodal-api-key", pref("multimodalApiKey", pref("openrouterApiKey", "")));
-    setValue("zotero-ai-embedding-model", pref("embeddingModel", "nvidia/nemotron-3-embed-1b:free"));
+    setValue("zotero-ai-embedding-model", pref("embeddingModel", "qwen/qwen3-embedding-8b"));
     setValue("zotero-ai-custom-embedding-model", pref("customEmbeddingModel", ""));
     setValue("zotero-ai-multimodal-model", pref("multimodalModel", "google/gemini-3.6-flash"));
     setValue("zotero-ai-custom-multimodal-model", pref("customMultimodalModel", ""));
@@ -56,9 +67,24 @@
     setValue("zotero-ai-summary-chunks", pref("maxSummaryChunks", 0));
     setValue("zotero-ai-summary-exclude-pages", pref("summaryExcludeTrailingPages", 2));
     setValue("zotero-ai-top-k", pref("referenceTopK", 5));
+    setValue("zotero-ai-embed-concurrency", pref("embedConcurrentRequests", 10));
+    setValue("zotero-ai-embed-batch-size", pref("embedBatchSize", 64));
   }
 
   function savePrefs() {
+    const concurrency = Number(getValue("zotero-ai-embed-concurrency") || 10);
+    const batchSize = Number(getValue("zotero-ai-embed-batch-size") || 64);
+    if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
+      setStatus("Embedding 并发请求数必须是大于 0 的整数。");
+      $("zotero-ai-embed-concurrency")?.focus();
+      return false;
+    }
+    if (!Number.isSafeInteger(batchSize) || batchSize < 1) {
+      setStatus("Embedding 每批片段数必须是大于 0 的整数。");
+      $("zotero-ai-embed-batch-size")?.focus();
+      return false;
+    }
+
     setPref("chatAPIFormat", getValue("zotero-ai-chat-api-format"));
     setPref("chatBaseURL", getValue("zotero-ai-chat-base-url").trim());
     setPref("chatApiKey", getValue("zotero-ai-chat-api-key").trim());
@@ -78,11 +104,17 @@
     setPref("maxSummaryChunks", Number(getValue("zotero-ai-summary-chunks") || 0));
     setPref("summaryExcludeTrailingPages", Number(getValue("zotero-ai-summary-exclude-pages") || 0));
     setPref("referenceTopK", Number(getValue("zotero-ai-top-k") || 5));
+    setPref("embedConcurrentRequests", concurrency);
+    setPref("embedBatchSize", batchSize);
     setStatus("Saved");
+    return true;
   }
 
   async function rebuildIndex() {
-    savePrefs();
+    if (!savePrefs()) {
+      return;
+    }
+    setIndexErrors("");
     const button = $("zotero-ai-rebuild-index");
     if (button) {
       button.disabled = true;
@@ -93,12 +125,13 @@
         throw new Error("Zotero AI plugin instance was not found. Restart Zotero and try again.");
       }
       const result = await app.rebuildIndexFromAnyWindow(setStatus);
-      const skipped = result.total - result.indexed;
-      const suffix = result.failures.length ? `, failed ${result.failures.length}` : "";
-      setStatus(`Indexed ${result.indexed}, skipped ${skipped}${suffix}`);
+      const report = app.formatIndexResult(result);
+      setStatus(report.summary);
+      setIndexErrors(report.details);
     }
     catch (err) {
       setStatus(err.message || String(err));
+      setIndexErrors(err.message || String(err));
     }
     finally {
       if (button) {

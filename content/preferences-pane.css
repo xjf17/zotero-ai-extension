@@ -45,4 +45,13 @@
 
 #zotero-ai-pref-status {
   color: #2563eb;
+  overflow-wrap: anywhere;
+}
+
+#zotero-ai-pref-index-errors {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }

@@ -39,7 +39,7 @@
           apiKeyPref: "embeddingApiKey",
           modelPref: "embeddingModel",
           customModelPref: "customEmbeddingModel",
-          defaultModel: "nvidia/nemotron-3-embed-1b:free"
+          defaultModel: "qwen/qwen3-embedding-8b"
         }
       }[kind] || null;
       if (!settings) {
@@ -164,9 +164,13 @@
         payload = { error: { message: text } };
       }
 
-      if (!response.ok) {
-        const message = payload?.error?.message || response.statusText || "API request failed";
-        const err = new Error(`${config.label} API ${response.status}: ${message}`);
+      if (!response.ok || payload?.error) {
+        const error = payload?.error;
+        const message = typeof error === "string" ? error
+          : error?.message || response.statusText || "API request failed";
+        const raw = error?.metadata?.raw;
+        const detail = raw ? (typeof raw === "string" ? raw : JSON.stringify(raw)) : "";
+        const err = new Error(`${config.label} API ${response.status}: ${message}${detail && detail !== message ? `\n服务商详情: ${detail}` : ""}`);
         err.status = response.status;
         throw err;
       }
@@ -223,11 +227,25 @@
       });
       const data = payload?.data;
       if (!Array.isArray(data)) {
-        throw new Error("Embedding API 返回格式异常。");
+        throw new Error("Embedding API 返回格式异常：缺少 data 数组。");
       }
-      return data
-        .sort((a, b) => (a.index || 0) - (b.index || 0))
-        .map((entry) => entry.embedding);
+      if (data.length !== input.length) {
+        throw new Error(`Embedding API 返回向量数量不匹配：发送 ${input.length} 个片段，收到 ${data.length} 个向量。`);
+      }
+      const ordered = data.slice().sort((a, b) => (a?.index || 0) - (b?.index || 0));
+      const hasIndices = ordered.some((entry) => entry?.index !== undefined);
+      const dimensions = ordered[0]?.embedding?.length;
+      for (let i = 0; i < ordered.length; i++) {
+        const entry = ordered[i];
+        if (hasIndices && entry?.index !== i) {
+          throw new Error(`Embedding API 返回的向量索引异常：第 ${i + 1} 个向量的 index 为 ${entry?.index}。`);
+        }
+        if (!Array.isArray(entry?.embedding) || !dimensions || entry.embedding.length !== dimensions
+          || !entry.embedding.every(Number.isFinite)) {
+          throw new Error(`Embedding API 第 ${i + 1} 个向量无效：必须是维度一致的非空数值数组。`);
+        }
+      }
+      return ordered.map((entry) => entry.embedding);
     }
 
     async parsePdfBase64(base64, prompt) {

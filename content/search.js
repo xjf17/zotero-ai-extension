@@ -9,6 +9,18 @@
 
   function setStatus(message) {
     $("zotero-ai-status").textContent = message;
+    $("zotero-ai-status").setAttribute("value", message);
+  }
+
+  function setIndexErrors(message) {
+    const details = $("zotero-ai-index-errors");
+    if (details) {
+      details.value = message;
+      details.hidden = !message;
+    }
+    else if (message) {
+      setStatus(`${$("zotero-ai-status")?.textContent || ""}\n${message}`.trim());
+    }
   }
 
   function getChunkOptions() {
@@ -18,21 +30,6 @@
       chunkSize: Number.isFinite(size) && size > 0 ? size : 500,
       chunkOverlap: Number.isFinite(overlap) && overlap >= 0 ? overlap : 100
     };
-  }
-
-  function createProgress(message) {
-    if (app?.createProgressHandle && openerWindow) {
-      return app.createProgressHandle(openerWindow, message);
-    }
-    return {
-      update: setStatus,
-      close() {}
-    };
-  }
-
-  function updateProgress(progress, message) {
-    setStatus(message);
-    progress?.update?.(message);
   }
 
   function clearResults() {
@@ -120,16 +117,13 @@
       return;
     }
 
-    let progress = null;
     setBusy(true);
     clearResults();
     try {
       ensureReady();
-      progress = createProgress("正在准备查找引用...");
-      const results = await app.searchReferences(openerWindow, query, (message) => {
-        updateProgress(progress, message);
-      });
-      updateProgress(progress, "正在显示查找结果...");
+      setStatus("正在准备查找引用...");
+      const results = await app.searchReferences(openerWindow, query, setStatus);
+      setStatus("正在显示查找结果...");
       renderResults(results);
       setStatus(`找到 ${results.length} 条结果`);
     }
@@ -137,33 +131,28 @@
       setStatus(err.message || String(err));
     }
     finally {
-      progress?.close?.();
       setBusy(false);
     }
   }
 
   async function rebuildIndex() {
-    let progress = null;
     setBusy(true);
     clearResults();
     try {
       ensureReady();
       const chunkOptions = getChunkOptions();
+      setIndexErrors("");
       setStatus(`使用 chunk=${chunkOptions.chunkSize} overlap=${chunkOptions.chunkOverlap} 重建索引...`);
-      progress = createProgress("正在准备重建引用索引...");
-      const result = await app.rebuildIndexForVisibleItems(openerWindow, (message) => {
-        updateProgress(progress, message);
-      }, chunkOptions);
-      const skipped = result.total - result.indexed;
-      const suffix = result.failures.length ? `，失败 ${result.failures.length} 篇` : "";
-      updateProgress(progress, "正在完成索引重建...");
-      setStatus(`索引完成: 新建/更新 ${result.indexed} 篇，跳过 ${skipped} 篇${suffix}`);
+      const result = await app.rebuildIndexForVisibleItems(openerWindow, setStatus, chunkOptions);
+      const report = app.formatIndexResult(result);
+      setStatus(report.summary);
+      setIndexErrors(report.details);
     }
     catch (err) {
       setStatus(err.message || String(err));
+      setIndexErrors(err.message || String(err));
     }
     finally {
-      progress?.close?.();
       setBusy(false);
     }
   }
